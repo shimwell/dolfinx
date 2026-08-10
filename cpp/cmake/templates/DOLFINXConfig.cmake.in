@@ -86,9 +86,12 @@ endif()
 if("@PETSC_FOUND@")
   if(NOT TARGET PkgConfig::PETSC)
     find_package(PkgConfig REQUIRED)
+    # The prefix DOLFINx was configured against is appended as a last resort, so
+    # that a PETSc installed from a pip wheel is found again here without the
+    # caller having to set PETSC_DIR.
     set(
       ENV{PKG_CONFIG_PATH}
-      "$ENV{PETSC_DIR}/$ENV{PETSC_ARCH}/lib/pkgconfig:$ENV{PETSC_DIR}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}"
+      "$ENV{PETSC_DIR}/$ENV{PETSC_ARCH}/lib/pkgconfig:$ENV{PETSC_DIR}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}:@PETSC_PREFIX_NORMALIZED@/lib/pkgconfig"
     )
     pkg_search_module(PETSC REQUIRED IMPORTED_TARGET PETSc petsc)
   endif()

@@ -128,6 +128,18 @@ add_feature_info(
   "Ask Python FFCx module where to find ufcx.h header using MODULE mode. Otherwise use CONFIG mode."
 )
 
+# Control PETSc discovery
+option(
+  DOLFINX_PETSC_PYTHON
+  "Ask Python petsc module for hint where to find PETSc install using pkg-config."
+  ON
+)
+add_feature_info(
+  DOLFINX_PETSC_PYTHON
+  DOLFINX_PETSC_PYTHON
+  "Ask Python petsc module for hint where to find PETSc install using pkg-config."
+)
+
 # clang-tidy
 option(ENABLE_CLANG_TIDY "Run clang-tidy while building" OFF)
 add_feature_info(
@@ -358,7 +370,7 @@ set_package_properties(
 )
 
 # Prepend <dir>/lib/pkgconfig (and <dir>/<arch>/lib/pkgconfig) to PKG_CONFIG_PATH.
-macro(dolfinx_prepend_pkgconfig_path dir_env_var)
+macro(dolfinx_prepend_pkgconfig_dir dir)
   block(SCOPE_FOR VARIABLES)
     if(WIN32)
       set(_sep ";")
@@ -370,19 +382,21 @@ macro(dolfinx_prepend_pkgconfig_path dir_env_var)
     else()
       set(_orig "")
     endif()
-    if(DEFINED ENV{${dir_env_var}})
+    set(ENV{PKG_CONFIG_PATH} "${dir}/lib/pkgconfig${_sep}${_orig}")
+    if(DEFINED ENV{PETSC_ARCH})
       set(
         ENV{PKG_CONFIG_PATH}
-        "$ENV{${dir_env_var}}/lib/pkgconfig${_sep}${_orig}"
+        "${dir}/$ENV{PETSC_ARCH}/lib/pkgconfig${_sep}$ENV{PKG_CONFIG_PATH}"
       )
-      if(DEFINED ENV{PETSC_ARCH})
-        set(
-          ENV{PKG_CONFIG_PATH}
-          "$ENV{${dir_env_var}}/$ENV{PETSC_ARCH}/lib/pkgconfig${_sep}$ENV{PKG_CONFIG_PATH}"
-        )
-      endif()
     endif()
   endblock()
+endmacro()
+
+# As above, but taking the directory from an environment variable.
+macro(dolfinx_prepend_pkgconfig_path dir_env_var)
+  if(DEFINED ENV{${dir_env_var}})
+    dolfinx_prepend_pkgconfig_dir("$ENV{${dir_env_var}}")
+  endif()
 endmacro()
 
 # ------------------------------------------------------------------------------
@@ -395,6 +409,34 @@ endif()
 
 if(DOLFINX_ENABLE_PETSC)
   find_package(PkgConfig REQUIRED)
+
+  # PETSc installed from a pip wheel keeps its pkg-config files in the Python
+  # module tree, so ask the Python interpreter where it is.
+  if(DOLFINX_PETSC_PYTHON)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+      message(STATUS "Checking for PETSc hints with ${Python3_EXECUTABLE}")
+      execute_process(
+        COMMAND
+          ${Python3_EXECUTABLE} -c
+          "import petsc, sys; sys.stdout.write(petsc.get_petsc_dir())"
+        OUTPUT_VARIABLE PETSC_PY_DIR
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+      )
+    endif()
+
+    if(PETSC_PY_DIR)
+      # Converts os native to cmake native path
+      cmake_path(SET PETSC_PY_DIR "${PETSC_PY_DIR}")
+      message(STATUS "Adding ${PETSC_PY_DIR} to PETSc search hints")
+      dolfinx_prepend_pkgconfig_dir("${PETSC_PY_DIR}")
+    else()
+      message(STATUS "No PETSc hint was found.")
+    endif()
+  endif()
+
+  # Prepended after the Python hint so that an explicit PETSC_DIR wins.
   dolfinx_prepend_pkgconfig_path(PETSC_DIR)
 
   if(_REQUIRE_PETSC)
@@ -405,9 +447,27 @@ if(DOLFINX_ENABLE_PETSC)
 
   # Setting for FeatureSummary
   if(PETSC_FOUND)
+    # The pkg-config files shipped in a PETSc wheel locate themselves relative
+    # to their own directory, so the prefix needs normalizing before it is
+    # compared with anything or recorded in DOLFINXConfig.cmake. Normalizing a
+    # path that ends in ".." leaves a trailing separator, so drop that too.
+    cmake_path(SET PETSC_PREFIX_NORMALIZED NORMALIZE "${PETSC_PREFIX}")
+    string(
+      REGEX REPLACE "/$"
+      ""
+      PETSC_PREFIX_NORMALIZED
+      "${PETSC_PREFIX_NORMALIZED}"
+    )
+
+    # Only add the rpath if PETSc was really taken from the Python module tree,
+    # and not from an explicit PETSC_DIR that happened to win the search.
+    if(PETSC_PY_DIR AND "${PETSC_PREFIX_NORMALIZED}" STREQUAL "${PETSC_PY_DIR}")
+      list(APPEND CMAKE_INSTALL_RPATH "${PETSC_PY_DIR}/lib")
+    endif()
+
     message(
       STATUS
-      "Found PETSc version ${PETSC_VERSION}, prefix: ${PETSC_PREFIX}"
+      "Found PETSc version ${PETSC_VERSION}, prefix: ${PETSC_PREFIX_NORMALIZED}"
     )
     set_property(GLOBAL APPEND PROPERTY PACKAGES_FOUND PETSc)
     list(APPEND CMAKE_PREFIX_PATH ${PETSC_PREFIX})
@@ -483,6 +543,9 @@ endif()
 if(DOLFINX_ENABLE_SUPERLU_DIST)
   find_package(PkgConfig REQUIRED)
   # If PETSc was built with SuperLU_DIST then pickup install there
+  if(PETSC_PY_DIR)
+    dolfinx_prepend_pkgconfig_dir("${PETSC_PY_DIR}")
+  endif()
   dolfinx_prepend_pkgconfig_path(PETSC_DIR)
 
   if(_REQUIRE_SUPERLU_DIST)
