@@ -47,8 +47,21 @@ find_package(nanobind CONFIG REQUIRED)
 # fix is released.
 enable_language(C)
 
-find_package(DOLFINX REQUIRED CONFIG)
-message(STATUS "Found DOLFINx at ${DOLFINX_DIR}")
+# When built from the top level CMakeLists.txt the C++ library is part of the
+# same build, so use that target rather than looking for an installed one. The
+# shared CMake modules are then taken from the source tree instead of from the
+# installed CMake package.
+# See https://gitlab.kitware.com/cmake/cmake/-/issues/16414
+if(TARGET dolfinx)
+  set(
+    DOLFINX_CMAKE_MODULE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/cmake/modules"
+  )
+else()
+  find_package(DOLFINX REQUIRED CONFIG)
+  message(STATUS "Found DOLFINx at ${DOLFINX_DIR}")
+  set(DOLFINX_CMAKE_MODULE_DIR "${DOLFINX_DIR}")
+endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Developer")
   # This enables warnings from DOLFINx headers even though they are a SYSTEM
@@ -108,7 +121,7 @@ if(NANOBIND_SABI)
   target_compile_definitions(cpp PRIVATE CYTHON_COMPILING_IN_LIMITED_API=1)
 endif()
 
-include("${DOLFINX_DIR}/DolfinxDeveloperCompilerFlags.cmake")
+include("${DOLFINX_CMAKE_MODULE_DIR}/DolfinxDeveloperCompilerFlags.cmake")
 
 target_compile_options(
   cpp
@@ -189,6 +202,16 @@ set_target_properties(
     INSTALL_RPATH_USE_LINK_PATH ${DOLFINX_INSTALL_RPATH_USE_LINK_PATH}
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
+
+if(DOLFINX_FULL_SKBUILD)
+  # The C++ library is bundled alongside the Python module, in dolfinx/lib, so
+  # add a relative rpath that survives the wheel being unpacked anywhere.
+  if(APPLE)
+    set_target_properties(cpp PROPERTIES INSTALL_RPATH "@loader_path/lib")
+  elseif(UNIX)
+    set_target_properties(cpp PROPERTIES INSTALL_RPATH "$ORIGIN/lib")
+  endif()
+endif()
 
 install(TARGETS cpp LIBRARY DESTINATION dolfinx)
 

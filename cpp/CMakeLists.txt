@@ -13,6 +13,15 @@ endif()
 # Set project name and version number
 project(DOLFINX VERSION "0.12.0.0")
 
+if(SKBUILD)
+  # Keep the library, the CMake package and the headers inside a dolfinx/
+  # subdirectory of the wheel. Also avoids lib64/, which can lead to linking
+  # issues.
+  set(CMAKE_INSTALL_LIBDIR dolfinx/lib)
+  set(CMAKE_INSTALL_INCLUDEDIR dolfinx/include)
+  set(CMAKE_INSTALL_BINDIR dolfinx/bin)
+endif()
+
 set(
   DOXYGEN_DOLFINX_VERSION
   ${DOLFINX_VERSION}

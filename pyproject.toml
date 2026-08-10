@@ -1,0 +1,48 @@
+# NOTE: This builds the DOLFINx C++ library and the Python interface together,
+# so that "pip install ." works from a source tree. The C++ dependencies (MPI,
+# parallel HDF5, Boost, pugixml, spdlog and Basix) still have to be present on
+# the system, pip cannot supply those.
+#
+# NOTE: As with python/pyproject.toml, this must be built without build
+# isolation (PEP517) due to the runtime and build time dependency on system
+# built petsc4py and mpi4py.
+[build-system]
+requires = ["scikit-build-core>=1.0.0", "nanobind>=2.9.2", "mpi4py"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "fenics-dolfinx"
+version = "0.12.0.dev0"
+description = "DOLFINx C++ library and Python interface"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "LGPL-3.0-or-later"
+license-files = ["COPYING*"]
+authors = [
+      { email = "fenics-steering-council@googlegroups.com" },
+      { name = "FEniCS Steering Council" },
+]
+dependencies = [
+      "numpy>=2",
+      "cffi",
+      "mpi4py",
+      "fenics-basix>=0.12.0.dev0",
+      "fenics-ffcx>=0.12.0.dev0",
+      "fenics-ufl>=2026.2.0.dev0",
+]
+
+[project.optional-dependencies]
+petsc4py = ["petsc4py"]
+
+[project.urls]
+homepage = "https://fenicsproject.org"
+repository = "https://github.com/fenics/dolfinx.git"
+documentation = "https://docs.fenicsproject.org"
+
+[tool.scikit-build]
+wheel.packages = ["python/dolfinx"]
+cmake.build-type = "Release"
+
+[tool.scikit-build.cmake.define]
+# Set to FALSE to disable automatic RPATH adjustments
+DOLFINX_INSTALL_RPATH_USE_LINK_PATH = "TRUE"
