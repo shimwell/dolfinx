@@ -46,6 +46,7 @@ pip install mpi4py numpy cffi scikit-build-core "nanobind>=2.9.2" ninja \
 pip install petsc petsc4py
 
 pip install --no-build-isolation \
+  -Ccmake.define.HDF5_ROOT=/usr/lib/x86_64-linux-gnu/hdf5/openmpi \
   "git+https://github.com/shimwell/dolfinx.git@pip-installable"
 ```
 
@@ -58,6 +59,17 @@ with:
 BackendUnavailable: Cannot import 'scikit_build_core.build'
 ```
 
+`HDF5_ROOT` is set explicitly because DOLFINx needs an MPI enabled HDF5, and any
+serial HDF5 elsewhere on the system can win the search instead. A serial build in
+`/usr/local` is a common way to end up with:
+
+```
+Found serial HDF5, MPI HDF5 build required.  Try setting HDF5_DIR or HDF5_ROOT.
+```
+
+Setting it is harmless when there is no conflict, so it is in the command above
+rather than left as a fix to apply later.
+
 ## Things that catch people out
 
 **`--no-build-isolation` is required.** DOLFINx compiles against the mpi4py and
@@ -69,16 +81,6 @@ runtime. The build still succeeds, so this failure is silent.
 **Install PETSc before DOLFINx.** Whether `dolfinx.fem.petsc` exists is decided
 when DOLFINx is compiled. Installing petsc4py afterwards does not add it, you
 have to reinstall DOLFINx.
-
-**A serial HDF5 can shadow the parallel one.** DOLFINx requires an MPI enabled
-HDF5. If configure stops with `Found serial HDF5, MPI HDF5 build required`, point
-it at the right one:
-
-```bash
-pip install --no-build-isolation \
-  -Ccmake.define.HDF5_ROOT=/usr/lib/x86_64-linux-gnu/hdf5/openmpi \
-  "git+https://github.com/shimwell/dolfinx.git@pip-installable"
-```
 
 **PETSc no longer needs `PETSC_DIR`.** This branch also teaches the build to ask
 the interpreter where a pip installed PETSc lives, so exporting `PETSC_DIR` by
