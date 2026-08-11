@@ -22,25 +22,40 @@ sudo apt install -y build-essential cmake ninja-build pkg-config git \
 
 ## Install
 
+Run the whole block. The order matters, see the note underneath.
+
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+sudo apt install -y build-essential cmake ninja-build pkg-config git \
+  python3-dev python3-venv \
+  libopenmpi-dev libhdf5-openmpi-dev libopenblas-dev \
+  libboost-dev libpugixml-dev libspdlog-dev libptscotch-dev
 
-# build tools, needed up front because the install below disables build isolation
-pip install mpi4py numpy cffi scikit-build-core "nanobind>=2.9.2" ninja
+python3 -m venv .venv
+source .venv/bin/activate
 
-# DOLFINx main requires Basix, FFCx and UFL at versions that are not released
-# yet, so these come from git rather than PyPI
-pip install "fenics-ufl@git+https://github.com/FEniCS/ufl.git" \
-            "fenics-basix@git+https://github.com/FEniCS/basix.git" \
-            "fenics-ffcx@git+https://github.com/FEniCS/ffcx.git"
+# Build tools, plus Basix, FFCx and UFL from git. DOLFINx main requires versions
+# of those three that are not released yet, so PyPI will not do.
+pip install mpi4py numpy cffi scikit-build-core "nanobind>=2.9.2" ninja \
+  "fenics-ufl@git+https://github.com/FEniCS/ufl.git" \
+  "fenics-basix@git+https://github.com/FEniCS/basix.git" \
+  "fenics-ffcx@git+https://github.com/FEniCS/ffcx.git"
 
-# optional, and slow: PETSc compiles from source, typically ten minutes or more.
-# Skip these two if you do not need dolfinx.fem.petsc
+# Optional, and slow: PETSc compiles from source, typically ten minutes or more.
+# Skip these two if you do not need dolfinx.fem.petsc, but see the note below,
+# they cannot be added afterwards without reinstalling DOLFINx.
 pip install petsc petsc4py
 
 pip install --no-build-isolation \
   "git+https://github.com/shimwell/dolfinx.git@pip-installable"
+```
+
+The last command uses `--no-build-isolation`, which means pip will not fetch the
+build backend for you. Everything it builds against has to be installed already,
+which is why it comes last. Running it on its own in a fresh environment fails
+with:
+
+```
+BackendUnavailable: Cannot import 'scikit_build_core.build'
 ```
 
 ## Things that catch people out
