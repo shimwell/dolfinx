@@ -70,8 +70,30 @@ endif()
 # Create the binding library nanobind handles its own calls to
 # target_link_libraries
 
+# nanobind folds Py_LIMITED_API into its ABI tag, so a DOLFINx built without
+# it cannot exchange types with a Basix built with it. The Basix wheels on PyPI
+# are limited API builds, so report the mismatch here rather than leaving it to
+# fail at run time.
+execute_process(
+  COMMAND
+    "${Python_EXECUTABLE}" -c "import basix._basixcpp as m; print(m.__file__)"
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  OUTPUT_VARIABLE BASIX_PYTHON_MODULE
+  ERROR_QUIET
+)
+
 if(NOT "${SKBUILD_SABI_VERSION}" STREQUAL "")
   set(NANOBIND_SABI "STABLE_ABI")
+elseif(BASIX_PYTHON_MODULE MATCHES "\\.abi3\\.")
+  message(
+    FATAL_ERROR
+    "Basix at ${BASIX_PYTHON_MODULE} is a limited API (abi3) build, but "
+    "DOLFINx is not being built against the limited API. nanobind will not "
+    "share types between the two extensions, and dolfinx.fem.functionspace "
+    "then fails at run time with 'incompatible function arguments'. Either "
+    "build Basix from source, or configure DOLFINx with -Cwheel.py-api=cp312 "
+    "to match the wheel."
+  )
 endif()
 
 nanobind_add_module(
