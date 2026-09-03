@@ -174,7 +174,7 @@ jobs:
             dnf install -y epel-release &&
             /usr/bin/crb enable &&
             dnf -y update &&
-            dnf -y install git hdf5-mpich-devel make \
+            dnf -y install gcc-gfortran git hdf5-mpich-devel make \
               mpich-devel ninja-build openblas-devel pugixml-devel spdlog-devel &&
             curl -L https://archives.boost.io/release/1.92.0/source/boost_1_92_0.tar.gz | tar -xz &&
             (cd boost_1_92_0/ && ./bootstrap.sh --prefix=/usr/local &&
@@ -205,10 +205,12 @@ jobs:
             echo /usr/local/lib64 > /etc/ld.so.conf.d/usr-local-lib64.conf && ldconfig &&
             pip -v install $(python -c "import tomllib; deps=tomllib.load(open('/project/dolfinx/python/pyproject.toml','rb'))['project']['dependencies']; print(' '.join(x for x in deps if 'fenics-basix' in x or 'fenics-ffcx' in x))") &&
             pip -v install mpi4py scikit-build-core[pyproject] nanobind &&
-            MPICC=gcc MPICXX=g++
-            PETSC_CONFIGURE_OPTIONS="--with-debugging=0 --with-fc=0
+            MPICC=gcc MPICXX=g++ MPIFORT=gfortran
+            PETSC_CONFIGURE_OPTIONS="--with-debugging=0
             --with-mpi-include=/usr/lib64/mpich/include
-            --with-mpi-lib=/usr/lib64/mpich/lib/libmpi.so"
+            --with-mpi-lib=[/usr/lib64/mpich/lib/libmpi.so,/usr/lib64/mpich/lib/libmpifort.so]
+            --download-mumps --download-scalapack
+            --with-fortran-bindings=0 --with-sowing=0"
             pip -v wheel petsc -w /petsc-wheels &&
             pip -v install --no-index --find-links=/petsc-wheels petsc &&
             PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
@@ -224,7 +226,7 @@ jobs:
             cmake --build dolfinx-build-dir/ &&
             cmake --install dolfinx-build-dir/
           CIBW_BEFORE_BUILD_MACOS: >
-            brew install boost hdf5-mpi ninja open-mpi openblas pkgconf pugixml spdlog &&
+            brew install boost gcc hdf5-mpi ninja open-mpi openblas pkgconf pugixml spdlog &&
             mkdir -p scotch && curl -L https://gitlab.inria.fr/scotch/scotch/-/archive/v7.0.12/scotch-v7.0.12.tar.bz2 | tar -xj --strip-components=1 -C scotch &&
             cmake -G Ninja -S scotch/ -B scotch-build-dir/ \
               -DCMAKE_BUILD_TYPE=Release \
@@ -249,7 +251,9 @@ jobs:
             sudo cmake --install superlu_dist-build-dir/ &&
             pip -v install $(python -c "import tomllib; deps=tomllib.load(open('dolfinx/python/pyproject.toml','rb'))['project']['dependencies']; print(' '.join(x for x in deps if 'fenics-basix' in x or 'fenics-ffcx' in x))") &&
             pip -v install wheel mpi4py scikit-build-core[pyproject] nanobind &&
-            PETSC_CONFIGURE_OPTIONS="--with-debugging=0 --with-fc=0"
+            PETSC_CONFIGURE_OPTIONS="--with-debugging=0
+            --download-mumps --download-scalapack --download-mumps-avoid-mpi-in-place
+            --with-fortran-bindings=0 --with-sowing=0"
             pip -v wheel petsc -w $GITHUB_WORKSPACE/petsc-wheels &&
             pip -v install --no-index --find-links=$GITHUB_WORKSPACE/petsc-wheels petsc &&
             PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
@@ -301,12 +305,12 @@ jobs:
           CIBW_TEST_COMMAND_LINUX: >
             . /etc/profile &&
             module load mpi/mpich-$(arch) &&
-            python -m pytest -n auto -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit &&
-            mpiexec -n 2 python -m pytest -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit
+            python -m pytest -n auto -m "not adios2" {project}/dolfinx/python/test/unit &&
+            mpiexec -n 2 python -m pytest -m "not adios2" {project}/dolfinx/python/test/unit
           CIBW_TEST_COMMAND_MACOS: >
             export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib${DYLD_LIBRARY_FALLBACK_PATH:+:${DYLD_LIBRARY_FALLBACK_PATH}}" &&
-            mpiexec -n 1 python -m pytest -n auto -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit &&
-            mpiexec -n 2 python -m pytest -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit
+            mpiexec -n 1 python -m pytest -n auto -m "not adios2" {project}/dolfinx/python/test/unit &&
+            mpiexec -n 2 python -m pytest -m "not adios2" {project}/dolfinx/python/test/unit
 
       - name: Update temporary simple503 repository (Linux)
         if: runner.os == 'Linux'
@@ -364,7 +368,7 @@ jobs:
           source venv-test/bin/activate
           PIP_EXTRA_INDEX_URL="file://${GITHUB_WORKSPACE}/simple" pip install --group dolfinx/python/pyproject.toml:test openmpi fenics-dolfinx
           which mpiexec
-          mpiexec -n 2 python -m pytest -m "not adios2" -k "not test_mixed_system" dolfinx/python/test/unit
+          mpiexec -n 2 python -m pytest -m "not adios2" dolfinx/python/test/unit
 
       - name: Update FEniCS Project simple503 repository
         run: |
