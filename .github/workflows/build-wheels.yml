@@ -210,11 +210,15 @@ jobs:
             PETSC_CONFIGURE_OPTIONS="--with-debugging=0
             --download-mumps --download-scalapack
             --with-fortran-bindings=0 --with-sowing=0"
-            pip -v wheel petsc -w /petsc-wheels &&
-            pip -v install --no-index --find-links=/petsc-wheels petsc &&
+            pip -v wheel petsc -w /project/petsc-wheels &&
+            pip -v install --no-index --find-links=/project/petsc-wheels petsc &&
             PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
-            pip -v wheel petsc4py -w /petsc-wheels &&
-            pip -v install --no-index --find-links=/petsc-wheels petsc4py &&
+            pip -v wheel petsc4py -w /project/petsc-wheels &&
+            pip -v install --no-index --find-links=/project/petsc-wheels petsc4py &&
+            PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
+            /opt/python/cp313-cp313/bin/pip wheel petsc4py -w /project/petsc-wheels &&
+            PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
+            /opt/python/cp314-cp314/bin/pip wheel petsc4py -w /project/petsc-wheels &&
             cmake -G Ninja -S dolfinx/cpp -B dolfinx-build-dir/ \
               -DPython3_EXECUTABLE=$(which python) \
               -DCMAKE_PREFIX_PATH=/usr/lib64/mpich \
@@ -298,7 +302,7 @@ jobs:
           CIBW_TEST_REQUIRES: pytest-xdist
           CIBW_TEST_GROUPS: test
           CIBW_BEFORE_TEST_LINUX: >
-            pip install --no-index --find-links=/petsc-wheels petsc petsc4py
+            pip install --no-index --find-links=/project/petsc-wheels petsc petsc4py
           CIBW_BEFORE_TEST_MACOS: >
             pip install --no-index --find-links=$GITHUB_WORKSPACE/petsc-wheels petsc petsc4py
           CIBW_TEST_COMMAND_LINUX: >
@@ -315,12 +319,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cp wheelhouse/* simple
+          cp petsc-wheels/*.whl simple
           python -m simple503 --base-url file:///shared simple
 
       - name: Update temporary simple503 repository (macOS)
         if: runner.os == 'macOS'
         run: |
           cp wheelhouse/* simple
+          cp petsc-wheels/*.whl simple
           python -m simple503 --base-url "file://${GITHUB_WORKSPACE}/simple" simple
 
       - name: Upload simple503-test artifact
@@ -335,30 +341,26 @@ jobs:
           name: wheelhouse-${{ matrix.os }}
           path: wheelhouse/*
 
-      # Disabled on this branch: a PETSc-enabled wheel needs petsc4py to
-      # preload libpetsc, and these steps install without it.
       - name: Test in clean python image with pypi MPICH
-        if: false && runner.os == 'Linux'
+        if: runner.os == 'Linux'
         run: >
           cd dolfinx &&
           sudo git clean -fdx && cd ../ &&
           docker run -v $(pwd)/dolfinx:/dolfinx -v $(pwd)/simple:/shared \
             --env PIP_INDEX_URL=file:///shared --env PIP_EXTRA_INDEX_URL=https://pypi.org/simple python:3.13 \
-            /bin/bash -l -c "pip install --group /dolfinx/python/pyproject.toml:test mpich fenics-dolfinx && mpiexec -n 2 python -m pytest -m 'not adios2 and not petsc4py' /dolfinx/python/test/unit"
+            /bin/bash -l -c "pip install --group /dolfinx/python/pyproject.toml:test mpich 'fenics-dolfinx[petsc4py]' && mpiexec -n 2 python -m pytest -m 'not adios2' /dolfinx/python/test/unit"
 
-      # Disabled on this branch: a PETSc-enabled wheel needs petsc4py to
-      # preload libpetsc, and these steps install without it.
       - name: Test in clean python image with pypi Intel MPI (x86_64 only)
-        if: false && runner.os == 'Linux' && runner.arch == 'X64'
+        if: runner.os == 'Linux' && runner.arch == 'X64'
         run: >
           cd dolfinx &&
           sudo git clean -fdx && cd ../ &&
           docker run -v $(pwd)/dolfinx:/dolfinx -v $(pwd)/simple:/shared \
             --env PIP_INDEX_URL=file:///shared --env PIP_EXTRA_INDEX_URL=https://pypi.org/simple python:3.14 \
-            /bin/bash -l -c "pip install --group /dolfinx/python/pyproject.toml:test impi-rt fenics-dolfinx && mpiexec -n 2 python -m pytest -m 'not adios2 and not petsc4py' /dolfinx/python/test/unit"
+            /bin/bash -l -c "pip install --group /dolfinx/python/pyproject.toml:test impi-rt 'fenics-dolfinx[petsc4py]' && mpiexec -n 2 python -m pytest -m 'not adios2' /dolfinx/python/test/unit"
 
-      # Disabled on this branch: a PETSc-enabled wheel needs petsc4py to
-      # preload libpetsc, and these steps install without it.
+      # Disabled on this branch: the petsc4py wheel is built for the Python
+      # cibuildwheel uses, which is not the one this venv is created from.
       - name: Test in clean virtual environment with pypi OpenMPI (macOS)
         if: false && runner.os == 'macOS'
         run: |
