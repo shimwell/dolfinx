@@ -216,10 +216,6 @@ jobs:
             PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
             pip -v wheel petsc4py -w /petsc-wheels &&
             pip -v install --no-index --find-links=/petsc-wheels petsc4py &&
-            PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
-            /opt/python/cp313-cp313/bin/pip wheel petsc4py -w /petsc-wheels &&
-            PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
-            /opt/python/cp314-cp314/bin/pip wheel petsc4py -w /petsc-wheels &&
             cmake -G Ninja -S dolfinx/cpp -B dolfinx-build-dir/ \
               -DPython3_EXECUTABLE=$(which python) \
               -DCMAKE_PREFIX_PATH=/usr/lib64/mpich \
@@ -323,14 +319,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cp wheelhouse/* simple
-          cp petsc-wheels/*.whl simple
+          cp petsc-wheels/petsc-*.whl simple
           python -m simple503 --base-url file:///shared simple
 
       - name: Update temporary simple503 repository (macOS)
         if: runner.os == 'macOS'
         run: |
           cp wheelhouse/* simple
-          cp petsc-wheels/*.whl simple
+          cp petsc-wheels/petsc-*.whl simple
           python -m simple503 --base-url "file://${GITHUB_WORKSPACE}/simple" simple
 
       - name: Upload simple503-test artifact
