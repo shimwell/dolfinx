@@ -133,7 +133,7 @@ jobs:
           python -m cibuildwheel --output-dir ../wheelhouse/ .
 
       - name: Make temporary simple503 repo directories
-        run: mkdir -p wheelhouse/ simple/
+        run: mkdir -p wheelhouse/ simple/ petsc-wheels/
 
       - name: Add wheels to simple503 repository (if built)
         if: ${{ github.event.inputs.build_fenicsx_stack == 'true' }}
@@ -211,15 +211,15 @@ jobs:
             PETSC_CONFIGURE_OPTIONS="--with-debugging=0
             --download-mumps --download-scalapack
             --with-fortran-bindings=0 --with-sowing=0"
-            pip -v wheel petsc -w /project/petsc-wheels &&
-            pip -v install --no-index --find-links=/project/petsc-wheels petsc &&
+            pip -v wheel petsc -w /petsc-wheels &&
+            pip -v install --no-index --find-links=/petsc-wheels petsc &&
             PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
-            pip -v wheel petsc4py -w /project/petsc-wheels &&
-            pip -v install --no-index --find-links=/project/petsc-wheels petsc4py &&
+            pip -v wheel petsc4py -w /petsc-wheels &&
+            pip -v install --no-index --find-links=/petsc-wheels petsc4py &&
             PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
-            /opt/python/cp313-cp313/bin/pip wheel petsc4py -w /project/petsc-wheels &&
+            /opt/python/cp313-cp313/bin/pip wheel petsc4py -w /petsc-wheels &&
             PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
-            /opt/python/cp314-cp314/bin/pip wheel petsc4py -w /project/petsc-wheels &&
+            /opt/python/cp314-cp314/bin/pip wheel petsc4py -w /petsc-wheels &&
             cmake -G Ninja -S dolfinx/cpp -B dolfinx-build-dir/ \
               -DPython3_EXECUTABLE=$(which python) \
               -DCMAKE_PREFIX_PATH=/usr/lib64/mpich \
@@ -286,6 +286,9 @@ jobs:
             wheel.py-api=cp312
             cmake.build-type="Release"
           CIBW_BUILD_FRONTEND: "build; args: -nx"
+          # The project is copied into the Linux container, not mounted, so
+          # the petsc wheels need a bind mount to survive back to the host.
+          CIBW_CONTAINER_ENGINE: "docker; create_args: --volume=${{ github.workspace }}/petsc-wheels:/petsc-wheels"
           # The first line allows auditwheel to find and bundle in libbasix
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
             export LD_LIBRARY_PATH=$(python -c "import site; print(site.getsitepackages()[0] + '/fenics_basix.libs')"):${LD_LIBRARY_PATH} &&
@@ -303,7 +306,7 @@ jobs:
           CIBW_TEST_REQUIRES: pytest-xdist
           CIBW_TEST_GROUPS: test
           CIBW_BEFORE_TEST_LINUX: >
-            pip install --no-index --find-links=/project/petsc-wheels petsc petsc4py
+            pip install --no-index --find-links=/petsc-wheels petsc petsc4py
           CIBW_BEFORE_TEST_MACOS: >
             pip install --no-index --find-links=$GITHUB_WORKSPACE/petsc-wheels petsc petsc4py
           CIBW_TEST_COMMAND_LINUX: >
