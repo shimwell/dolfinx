@@ -375,6 +375,11 @@ jobs:
           name: simple503-test-${{ matrix.os }}
           path: simple/*
 
+      # The combined simple503 repository is assembled from the wheelhouse
+      # artifacts, so the petsc wheels have to travel with them
+      - name: Add the petsc wheels to the wheelhouse
+        run: cp petsc-wheels/*.whl wheelhouse/
+
       - name: Upload wheelhouse artifact
         uses: actions/upload-artifact@v7
         with:
