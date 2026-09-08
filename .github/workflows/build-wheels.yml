@@ -62,6 +62,9 @@ jobs:
   build_wheels:
     name: Build wheels
     runs-on: ${{ matrix.os }}
+    # GitHub kills a job at 360 min with no usable diagnostics. Stop
+    # short of that so a hang reports as a clean failure.
+    timeout-minutes: 300
     strategy:
       # Iterating on this branch: let every platform report rather than
       # cancelling the rest on the first failure.
@@ -339,7 +342,7 @@ jobs:
             find {dest_dir}/unpacked \( -name "*.so" -o -name "*.dylib" \) | xargs -I% codesign --force --sign - % &&
             wheel pack {dest_dir}/unpacked/* -d {dest_dir} &&
             pipx run abi3audit --verbose --strict --report {wheel}
-          CIBW_TEST_REQUIRES: pytest-xdist
+          CIBW_TEST_REQUIRES: pytest-xdist pytest-timeout
           CIBW_TEST_GROUPS: test
           CIBW_BEFORE_TEST_LINUX: >
             pip install mpich mpi4py &&
@@ -348,12 +351,12 @@ jobs:
             pip install openmpi mpi4py &&
             pip install --no-index --find-links=$GITHUB_WORKSPACE/petsc-wheels petsc petsc4py
           CIBW_TEST_COMMAND_LINUX: >
-            python -m pytest -n auto -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit &&
-            mpiexec -n 2 python -m pytest -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit
+            python -m pytest --timeout=900 --timeout-method=thread -n auto -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit &&
+            mpiexec -n 2 python -m pytest --timeout=900 --timeout-method=thread -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit
           CIBW_TEST_COMMAND_MACOS: >
             export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib${DYLD_LIBRARY_FALLBACK_PATH:+:${DYLD_LIBRARY_FALLBACK_PATH}}" &&
-            mpiexec -n 1 python -m pytest -n auto -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit &&
-            mpiexec -n 2 python -m pytest -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit
+            mpiexec -n 1 python -m pytest --timeout=900 --timeout-method=thread -n auto -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit &&
+            mpiexec -n 2 python -m pytest --timeout=900 --timeout-method=thread -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit
 
       - name: Update temporary simple503 repository (Linux)
         if: runner.os == 'Linux'
@@ -393,7 +396,7 @@ jobs:
           sudo git clean -fdx && cd ../ &&
           docker run -v $(pwd)/dolfinx:/dolfinx -v $(pwd)/simple:/shared \
             --env PIP_INDEX_URL=file:///shared --env PIP_EXTRA_INDEX_URL=https://pypi.org/simple python:3.13 \
-            /bin/bash -l -c "pip install --group /dolfinx/python/pyproject.toml:test mpich petsc 'fenics-dolfinx[petsc4py]' && mpiexec -n 2 python -m pytest -m 'not adios2' -k 'not test_mixed_system' /dolfinx/python/test/unit"
+            /bin/bash -l -c "pip install --group /dolfinx/python/pyproject.toml:test pytest-timeout mpich petsc 'fenics-dolfinx[petsc4py]' && mpiexec -n 2 python -m pytest --timeout=900 --timeout-method=thread -m 'not adios2' -k 'not test_mixed_system' /dolfinx/python/test/unit"
 
       - name: Test in clean python image with pypi Intel MPI (x86_64 only)
         if: runner.os == 'Linux' && runner.arch == 'X64'
@@ -402,7 +405,7 @@ jobs:
           sudo git clean -fdx && cd ../ &&
           docker run -v $(pwd)/dolfinx:/dolfinx -v $(pwd)/simple:/shared \
             --env PIP_INDEX_URL=file:///shared --env PIP_EXTRA_INDEX_URL=https://pypi.org/simple python:3.14 \
-            /bin/bash -l -c "pip install --group /dolfinx/python/pyproject.toml:test impi-rt petsc 'fenics-dolfinx[petsc4py]' && mpiexec -n 2 python -m pytest -m 'not adios2' -k 'not test_mixed_system' /dolfinx/python/test/unit"
+            /bin/bash -l -c "pip install --group /dolfinx/python/pyproject.toml:test pytest-timeout impi-rt petsc 'fenics-dolfinx[petsc4py]' && mpiexec -n 2 python -m pytest --timeout=900 --timeout-method=thread -m 'not adios2' -k 'not test_mixed_system' /dolfinx/python/test/unit"
 
       # Disabled on this branch: the petsc4py wheel is built for the Python
       # cibuildwheel uses, which is not the one this venv is created from.
@@ -412,9 +415,9 @@ jobs:
           cd dolfinx && git clean -fdx && cd ../
           python -m venv venv-test
           source venv-test/bin/activate
-          PIP_EXTRA_INDEX_URL="file://${GITHUB_WORKSPACE}/simple" pip install --group dolfinx/python/pyproject.toml:test openmpi fenics-dolfinx
+          PIP_EXTRA_INDEX_URL="file://${GITHUB_WORKSPACE}/simple" pip install --group dolfinx/python/pyproject.toml:test pytest-timeout openmpi fenics-dolfinx
           which mpiexec
-          mpiexec -n 2 python -m pytest -m "not adios2" dolfinx/python/test/unit
+          mpiexec -n 2 python -m pytest --timeout=900 --timeout-method=thread -m "not adios2" dolfinx/python/test/unit
 
       - name: Update FEniCS Project simple503 repository
         run: |
