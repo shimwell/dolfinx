@@ -210,11 +210,8 @@ jobs:
               -DCMAKE_BUILD_TYPE=Release \
               -DBUILD_SHARED_LIBS=ON \
               -DCMAKE_PREFIX_PATH=$MPI_PREFIX \
-              -DTPL_ENABLE_PARMETISLIB=ON \
+              -DTPL_ENABLE_PARMETISLIB=OFF \
               -DXSDK_ENABLE_Fortran=OFF \
-              -DTPL_PARMETIS_INCLUDE_DIRS=/usr/local/include \
-              -DTPL_PARMETIS_LIBRARIES="-lptscotchparmetisv3 -lptscotch -lptscotcherr -lscotchmetisv5 -lscotch -lscotcherr" \
-              -DCMAKE_C_FLAGS_INIT="-DSCOTCH_METIS_VERSION=5" \
               -DTPL_ENABLE_LAPACKLIB=ON &&
             cmake --build superlu_dist-build-dir/ &&
             cmake --install superlu_dist-build-dir/ &&
@@ -279,11 +276,8 @@ jobs:
               -DCMAKE_BUILD_TYPE=Release \
               -DBUILD_SHARED_LIBS=ON \
               -DCMAKE_PREFIX_PATH="$MPI_PREFIX;${CMAKE_PREFIX_PATH}" \
-              -DTPL_ENABLE_PARMETISLIB=ON \
+              -DTPL_ENABLE_PARMETISLIB=OFF \
               -DXSDK_ENABLE_Fortran=OFF \
-              -DTPL_PARMETIS_INCLUDE_DIRS=/usr/local/include \
-              -DTPL_PARMETIS_LIBRARIES="-lptscotchparmetisv3 -lptscotch -lptscotcherr -lscotchmetisv5 -lscotch -lscotcherr" \
-              -DCMAKE_C_FLAGS_INIT="-DSCOTCH_METIS_VERSION=5" \
               -DTPL_ENABLE_LAPACKLIB=ON &&
             cmake --build superlu_dist-build-dir/ &&
             sudo cmake --install superlu_dist-build-dir/ &&
