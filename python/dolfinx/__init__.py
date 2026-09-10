@@ -18,6 +18,46 @@ import numpy as _np
 default_scalar_type: type[_np.floating | _np.complexfloating]
 default_real_type: type[_np.floating]
 
+
+def _preload_petsc() -> None:
+    """Open libpetsc from a pip-installed petsc package.
+
+    A wheel does not vendor libpetsc, because petsc4py and DOLFINx have to
+    share a single copy of it. The petsc package installs the library to
+    site-packages/petsc/lib, a sibling of site-packages/dolfinx, and nothing
+    puts that directory on the loader path, so importing the compiled modules
+    fails with "libpetsc.so.3.25: cannot open shared object file". Opening the
+    library here by absolute path puts it in the process before anything that
+    needs it is loaded, and the loader then satisfies those dependencies from
+    the library already in the link map.
+
+    Does nothing when the petsc package is absent, which is every build that
+    is not against a pip-installed PETSc.
+    """
+    if sys.platform == "win32":
+        return
+
+    import ctypes
+    import glob
+    import os
+
+    try:
+        import petsc
+    except ImportError:
+        return
+
+    pattern = "libpetsc*.dylib" if sys.platform == "darwin" else "libpetsc.so*"
+    for candidate in sorted(glob.glob(os.path.join(petsc.get_petsc_dir(), "lib", pattern))):
+        try:
+            ctypes.CDLL(candidate, mode=ctypes.RTLD_GLOBAL)
+        except OSError:
+            continue
+        else:
+            return
+
+
+_preload_petsc()
+
 try:
     from petsc4py import PETSc as _PETSc
 
