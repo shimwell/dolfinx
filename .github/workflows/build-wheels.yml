@@ -242,11 +242,11 @@ jobs:
             wheel pack /petsc-unpacked/* -d /petsc-wheels &&
             pip -v install --no-index --find-links=/petsc-wheels petsc &&
             PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
-            pip -v wheel /petsc-src/src/binding/petsc4py -w /petsc-wheels &&
+            PIP_FIND_LINKS=/petsc-wheels PIP_PRE=1 pip -v wheel /petsc-src/src/binding/petsc4py -w /petsc-wheels &&
             pip -v install --no-index --find-links=/petsc-wheels petsc4py &&
             for PY in /opt/python/cp313-cp313 /opt/python/cp314-cp314; do
               PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
-              $PY/bin/pip wheel /petsc-src/src/binding/petsc4py -w /petsc-wheels || exit 1;
+              PIP_FIND_LINKS=/petsc-wheels PIP_PRE=1 $PY/bin/pip wheel /petsc-src/src/binding/petsc4py -w /petsc-wheels || exit 1;
             done &&
             pip install patchelf wheel &&
             for W in /petsc-wheels/petsc4py-*.whl; do
