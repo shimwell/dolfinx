@@ -190,6 +190,36 @@ set_target_properties(
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
+# Locate libpetsc in a pip-installed petsc package.
+#
+# A wheel deliberately does not vendor libpetsc, because petsc4py and DOLFINx
+# have to share a single copy of it. The petsc package installs the library to
+# site-packages/petsc/lib, a sibling of site-packages/dolfinx, and nothing puts
+# that directory on the loader path, so `import dolfinx.cpp` fails with
+# "libpetsc.so.3.25: cannot open shared object file". An $ORIGIN-relative rpath
+# finds it wherever the environment is later moved to.
+if("HAS_PETSC" IN_LIST _dolfinx_defs)
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c "import petsc; print(petsc.get_petsc_dir())"
+    OUTPUT_VARIABLE PETSC_PY_DIR
+    RESULT_VARIABLE PETSC_PY_COMMAND_RESULT
+    ERROR_QUIET
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  if(NOT PETSC_PY_COMMAND_RESULT)
+    message(STATUS "Found petsc Python module at ${PETSC_PY_DIR}")
+    if(APPLE)
+      set(_petsc_py_rpath "@loader_path/../petsc/lib")
+    else()
+      set(_petsc_py_rpath "$ORIGIN/../petsc/lib")
+    endif()
+    message(STATUS "Adding ${_petsc_py_rpath} to the rpath of the cpp module")
+    set_property(TARGET cpp APPEND PROPERTY INSTALL_RPATH "${_petsc_py_rpath}")
+  else()
+    message(STATUS "No petsc Python module was found.")
+  endif()
+endif()
+
 install(TARGETS cpp LIBRARY DESTINATION dolfinx)
 
 # and the nanobind typing stubs.
