@@ -417,8 +417,16 @@ jobs:
             --env PIP_INDEX_URL=file:///shared --env PIP_EXTRA_INDEX_URL=https://pypi.org/simple python:3.13 \
             /bin/bash -l -c "pip install --pre --group /dolfinx/python/pyproject.toml:test pytest-timeout mpich petsc 'fenics-dolfinx[petsc4py]' && timeout -k 60 1200 mpiexec -n 2 python -m pytest -v -m 'not adios2' -k 'not test_mixed_system' /dolfinx/python/test/unit"
 
+      # Disabled on this branch: PETSc is built against the PyPI MPICH, and
+      # its configure enables MPIX_STREAM because MPICH provides the enqueue
+      # extensions. Intel MPI is MPICH ABI compatible but does not implement
+      # them, so libpetsc fails to load with
+      #   undefined symbol: MPIX_Irecv_enqueue
+      # There is no configure flag to turn this off, it is a link test on
+      # whatever MPI is present. One petsc wheel serving several MPIs is what
+      # petsc!9516 and the MPI standard ABI are for, so revisit after 3.26.
       - name: Test in clean python image with pypi Intel MPI (x86_64 only)
-        if: runner.os == 'Linux' && runner.arch == 'X64'
+        if: false && runner.os == 'Linux' && runner.arch == 'X64'
         run: >
           cd dolfinx &&
           sudo git clean -fdx && cd ../ &&
