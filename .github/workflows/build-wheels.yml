@@ -208,7 +208,8 @@ jobs:
             git clone --branch v9.2.1 --single-branch https://github.com/xiaoyeli/superlu_dist.git &&
             cmake -G Ninja -S superlu_dist/ -B superlu_dist-build-dir/ \
               -DCMAKE_BUILD_TYPE=Release \
-              -DBUILD_SHARED_LIBS=ON \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
               -DCMAKE_PREFIX_PATH=$MPI_PREFIX \
               -DTPL_ENABLE_PARMETISLIB=OFF \
               -DXSDK_ENABLE_Fortran=OFF \
@@ -274,7 +275,8 @@ jobs:
             git clone --branch v9.2.1 --single-branch https://github.com/xiaoyeli/superlu_dist.git &&
             cmake -G Ninja -S superlu_dist/ -B superlu_dist-build-dir/ \
               -DCMAKE_BUILD_TYPE=Release \
-              -DBUILD_SHARED_LIBS=ON \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
               -DCMAKE_PREFIX_PATH="$MPI_PREFIX;${CMAKE_PREFIX_PATH}" \
               -DTPL_ENABLE_PARMETISLIB=OFF \
               -DXSDK_ENABLE_Fortran=OFF \
