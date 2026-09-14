@@ -267,9 +267,11 @@ jobs:
             pip wheel --no-build-isolation --no-binary scifem scifem -w /petsc-wheels --no-deps
             -Cwheel.py-api=cp312 &&
             for W in /petsc-wheels/scifem-*.whl; do
-              rm -rf /tmp/sci && wheel unpack $W -d /tmp/sci &&
-              patchelf --set-rpath '$ORIGIN/../dolfinx/lib:$ORIGIN/../basix/lib:$ORIGIN/../../../..' $(find /tmp/sci -name '_scifem*.so') &&
-              rm $W && wheel pack /tmp/sci/scifem-* -d /petsc-wheels || exit 1;
+              rm -rf /scifem-repaired /tmp/sci &&
+              auditwheel repair --exclude libdolfinx.so* --exclude libbasix.so* --exclude libmpi.so* -w /scifem-repaired $W &&
+              rm $W && wheel unpack /scifem-repaired/scifem-*.whl -d /tmp/sci &&
+              patchelf --add-rpath '$ORIGIN/../dolfinx/lib:$ORIGIN/../basix/lib:$ORIGIN/../../../..' $(find /tmp/sci -name '_scifem*.so') &&
+              wheel pack /tmp/sci/scifem-* -d /petsc-wheels || exit 1;
             done
           CIBW_BEFORE_BUILD_MACOS: >
             brew install boost ninja openblas pkgconf pugixml spdlog &&
