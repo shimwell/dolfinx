@@ -381,14 +381,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cp wheelhouse/* simple
-          cp petsc-wheels/*.whl simple
+          cp petsc-wheels/petsc-*.whl petsc-wheels/petsc4py-*.whl simple
           python -m simple503 --base-url file:///shared simple
 
       - name: Update temporary simple503 repository (macOS)
         if: runner.os == 'macOS'
         run: |
           cp wheelhouse/* simple
-          cp petsc-wheels/*.whl simple
+          cp petsc-wheels/petsc-*.whl petsc-wheels/petsc4py-*.whl simple
           python -m simple503 --base-url "file://${GITHUB_WORKSPACE}/simple" simple
 
       - name: Upload simple503-test artifact
@@ -400,7 +400,7 @@ jobs:
       # The combined simple503 repository is assembled from the wheelhouse
       # artifacts, so the petsc wheels have to travel with them
       - name: Add the petsc wheels to the wheelhouse
-        run: cp petsc-wheels/*.whl wheelhouse/
+        run: cp petsc-wheels/petsc-*.whl petsc-wheels/petsc4py-*.whl wheelhouse/
 
       - name: Upload wheelhouse artifact
         uses: actions/upload-artifact@v7
