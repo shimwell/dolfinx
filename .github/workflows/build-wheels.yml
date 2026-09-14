@@ -349,6 +349,7 @@ jobs:
             wheel unpack {dest_dir}/*.whl -d {dest_dir}/unpacked &&
             rm {dest_dir}/*.whl &&
             find {dest_dir}/unpacked -name "*.so*" -type f | xargs -I% patchelf --add-rpath '$ORIGIN/../petsc/lib' % &&
+            bash /project/dolfinx/.github/scripts/restore-dolfinx-soname.sh {dest_dir}/unpacked/* &&
             wheel pack {dest_dir}/unpacked/* -d {dest_dir} &&
             pipx run abi3audit --verbose --strict --report {wheel}
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
