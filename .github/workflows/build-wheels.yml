@@ -262,7 +262,15 @@ jobs:
               -DDOLFINX_ENABLE_SCOTCH=ON \
               -DDOLFINX_ENABLE_PARMETIS=OFF &&
             cmake --build dolfinx-build-dir/ &&
-            cmake --install dolfinx-build-dir/
+            cmake --install dolfinx-build-dir/ &&
+            pip install pkgconfig &&
+            pip wheel --no-build-isolation --no-binary scifem scifem -w /petsc-wheels --no-deps
+            -Cwheel.py-api=cp312 &&
+            for W in /petsc-wheels/scifem-*.whl; do
+              rm -rf /tmp/sci && wheel unpack $W -d /tmp/sci &&
+              patchelf --set-rpath '$ORIGIN/../dolfinx/lib:$ORIGIN/../basix/lib:$ORIGIN/../../../..' $(find /tmp/sci -name '_scifem*.so') &&
+              rm $W && wheel pack /tmp/sci/scifem-* -d /petsc-wheels || exit 1;
+            done
           CIBW_BEFORE_BUILD_MACOS: >
             brew install boost ninja openblas pkgconf pugixml spdlog &&
             pip install openmpi mpi4py &&
@@ -383,6 +391,7 @@ jobs:
         run: |
           cp wheelhouse/* simple
           cp petsc-wheels/petsc-*.whl petsc-wheels/petsc4py-*.whl simple
+          cp petsc-wheels/scifem-*.whl simple 2>/dev/null || true
           python -m simple503 --base-url file:///shared simple
 
       - name: Update temporary simple503 repository (macOS)
@@ -390,6 +399,7 @@ jobs:
         run: |
           cp wheelhouse/* simple
           cp petsc-wheels/petsc-*.whl petsc-wheels/petsc4py-*.whl simple
+          cp petsc-wheels/scifem-*.whl simple 2>/dev/null || true
           python -m simple503 --base-url "file://${GITHUB_WORKSPACE}/simple" simple
 
       - name: Upload simple503-test artifact
@@ -401,7 +411,9 @@ jobs:
       # The combined simple503 repository is assembled from the wheelhouse
       # artifacts, so the petsc wheels have to travel with them
       - name: Add the petsc wheels to the wheelhouse
-        run: cp petsc-wheels/petsc-*.whl petsc-wheels/petsc4py-*.whl wheelhouse/
+        run: |
+          cp petsc-wheels/petsc-*.whl petsc-wheels/petsc4py-*.whl wheelhouse/
+          cp petsc-wheels/scifem-*.whl wheelhouse/ 2>/dev/null || true
 
       - name: Upload wheelhouse artifact
         uses: actions/upload-artifact@v7
