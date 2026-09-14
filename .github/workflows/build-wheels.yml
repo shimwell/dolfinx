@@ -227,6 +227,20 @@ jobs:
               -DTPL_ENABLE_LAPACKLIB=ON &&
             cmake --build superlu_dist-build-dir/ &&
             cmake --install superlu_dist-build-dir/ &&
+            curl -L https://github.com/ornladios/ADIOS2/archive/refs/tags/v2.10.2.tar.gz | tar -xz &&
+            cmake -G Ninja -S ADIOS2-2.10.2 -B adios2-build-dir/ \
+              -DCMAKE_INSTALL_PREFIX=/usr/local \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_SHARED_LIBS=ON \
+              -DBUILD_TESTING=OFF \
+              -DADIOS2_USE_MPI=ON \
+              -DADIOS2_USE_Fortran=OFF \
+              -DADIOS2_USE_Python=OFF \
+              -DADIOS2_USE_HDF5=OFF \
+              -DADIOS2_BUILD_EXAMPLES=OFF \
+              -DMPI_HOME=$MPI_PREFIX &&
+            cmake --build adios2-build-dir/ &&
+            cmake --install adios2-build-dir/ &&
             printf '/usr/local/lib64\n/usr/local/lib\n' > /etc/ld.so.conf.d/dolfinx-wheel.conf && ldconfig &&
             pip -v install $(python -c "import tomllib; deps=tomllib.load(open('/project/dolfinx/python/pyproject.toml','rb'))['project']['dependencies']; print(' '.join(x for x in deps if 'fenics-basix' in x or 'fenics-ffcx' in x))") &&
             pip -v install scikit-build-core nanobind &&
@@ -260,6 +274,7 @@ jobs:
               -DCMAKE_BUILD_TYPE=RelWithDebInfo \
               -DDOLFINX_ENABLE_SUPERLU_DIST=ON \
               -DDOLFINX_ENABLE_SCOTCH=ON \
+              -DDOLFINX_ENABLE_ADIOS2=ON \
               -DDOLFINX_ENABLE_PARMETIS=OFF &&
             cmake --build dolfinx-build-dir/ &&
             cmake --install dolfinx-build-dir/ &&
