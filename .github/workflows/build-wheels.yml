@@ -467,7 +467,6 @@ jobs:
             wheel unpack {dest_dir}/*.whl -d {dest_dir}/unpacked &&
             rm {dest_dir}/*.whl &&
             find {dest_dir}/unpacked -name "*.so*" -type f | xargs -I% patchelf --add-rpath '$ORIGIN/../petsc/lib' % &&
-            bash /project/dolfinx/.github/scripts/restore-dolfinx-soname.sh {dest_dir}/unpacked/* &&
             wheel pack {dest_dir}/unpacked/* -d {dest_dir} &&
             pipx run abi3audit --verbose --strict --report {wheel}
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
@@ -496,6 +495,63 @@ jobs:
             export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib${DYLD_LIBRARY_FALLBACK_PATH:+:${DYLD_LIBRARY_FALLBACK_PATH}}" &&
             mpiexec -n 1 python -m pytest --timeout=900 --timeout-method=thread -n auto -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit &&
             mpiexec -n 2 python -m pytest --timeout=900 --timeout-method=thread -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit
+
+      - name: Demonstrate consolidatewheels on DOLFINx and scifem
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install consolidatewheels==0.5 patchelf wheel
+
+          # Show the supported unversioned case and DOLFINx's versioned case
+          # directly, before exercising the complete wheels.
+          python - <<'PY'
+          import pathlib
+          import tempfile
+
+          from consolidatewheels.consolidate_linux import buildlibmap
+
+          with tempfile.TemporaryDirectory() as root:
+              libs = pathlib.Path(root) / "example.libs"
+              libs.mkdir()
+              (libs / "libexample-deadbeef.so").touch()
+              unversioned = buildlibmap([root])
+              (libs / "libdolfinx-deadbeef.so.0.12.0.0").touch()
+              versioned = buildlibmap([root])
+
+          print(f"Unversioned library map: {unversioned}")
+          print(f"Map after adding versioned libdolfinx: {versioned}")
+          assert unversioned == {"libexample.so": "libexample-deadbeef.so"}
+          assert not any(name.startswith("libdolfinx") for name in versioned)
+          PY
+
+          mkdir consolidated-wheels
+          consolidatewheels \
+            wheelhouse/fenics_dolfinx-*.whl \
+            petsc-wheels/scifem-*.whl \
+            --dest consolidated-wheels
+
+          rm -rf /tmp/consolidate-dolfinx /tmp/consolidate-scifem
+          wheel unpack consolidated-wheels/fenics_dolfinx-*.whl -d /tmp/consolidate-dolfinx
+          wheel unpack consolidated-wheels/scifem-*.whl -d /tmp/consolidate-scifem
+          bundled=$(find /tmp/consolidate-dolfinx -name 'libdolfinx-*.so.*' -type f -print -quit)
+          extension=$(find /tmp/consolidate-scifem -name '_scifem*.so' -type f -print -quit)
+          needed=$(patchelf --print-needed "$extension" | grep '^libdolfinx\.so\.')
+          test -n "$bundled"
+          test -n "$needed"
+
+          {
+            echo '## consolidatewheels 0.5 Linux result'
+            echo
+            echo 'The stock tool completed successfully, but did not associate the versioned auditwheel library with the scifem dependency.'
+            echo
+            echo "- Bundled DOLFINx library: \`$(basename "$bundled")\`"
+            echo "- scifem DT_NEEDED entry: \`$needed\`"
+            echo '- Supported control: `libexample-deadbeef.so` was mapped to `libexample.so`.'
+            echo '- Unsupported case: `libdolfinx-<hash>.so.0.12.0.0` was omitted because Linux discovery uses `*.libs/*.so`.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          rm wheelhouse/fenics_dolfinx-*.whl petsc-wheels/scifem-*.whl
+          mv consolidated-wheels/fenics_dolfinx-*.whl wheelhouse/
+          mv consolidated-wheels/scifem-*.whl petsc-wheels/
 
       - name: Update temporary simple503 repository (Linux)
         if: runner.os == 'Linux'
@@ -540,6 +596,27 @@ jobs:
           docker run -v $(pwd)/dolfinx:/dolfinx -v $(pwd)/simple:/shared \
             --env PIP_INDEX_URL=file:///shared --env PIP_EXTRA_INDEX_URL=https://pypi.org/simple python:3.13 \
             /bin/bash -l -c "pip install --pre --group /dolfinx/python/pyproject.toml:test pytest-timeout mpich petsc adios2 'fenics-dolfinx[petsc4py]' && timeout -k 60 1200 mpiexec -n 2 python -m pytest -v -k 'not test_mixed_system' /dolfinx/python/test/unit"
+
+      - name: Confirm current scifem limitation
+        if: runner.os == 'Linux'
+        run: |
+          set +e
+          output=$(docker run -v "$(pwd)/simple:/shared" \
+            --env PIP_INDEX_URL=file:///shared \
+            --env PIP_EXTRA_INDEX_URL=https://pypi.org/simple \
+            python:3.13 /bin/bash -l -c \
+            "pip install --pre mpich petsc 'fenics-dolfinx[petsc4py]' /shared/scifem-*.whl >/dev/null && python -c 'import scifem'" 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          test "$status" -ne 0
+          grep -q 'libdolfinx.so.' <<< "$output"
+          {
+            echo
+            echo '### Clean direct import'
+            echo
+            echo '`import scifem` fails as expected because its canonical versioned DT_NEEDED entry was not rewritten.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Disabled on this branch: PETSc is built against the PyPI MPICH, and
       # its configure enables MPIX_STREAM because MPICH provides the enqueue
