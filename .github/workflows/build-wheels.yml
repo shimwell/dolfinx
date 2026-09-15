@@ -260,7 +260,12 @@ jobs:
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
             export LD_LIBRARY_PATH=$(python -c "import site; print(site.getsitepackages()[0] + '/fenics_basix.libs')"):${LD_LIBRARY_PATH} &&
             auditwheel repair --exclude libmpi.so* -w {dest_dir} {wheel} &&
-            pipx run abi3audit --verbose --strict --report {wheel}
+            python -m pip install --quiet wheel &&
+            wheel unpack {dest_dir}/*.whl -d {dest_dir}/unpacked &&
+            rm {dest_dir}/*.whl &&
+            bash /project/dolfinx/.github/scripts/restore-dolfinx-soname.sh {dest_dir}/unpacked/* &&
+            wheel pack {dest_dir}/unpacked/* -d {dest_dir} &&
+            pipx run abi3audit --verbose --strict --report {dest_dir}/*.whl
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
             delocate-listdeps --depending {wheel} &&
             delocate-wheel --require-archs {delocate_archs} --exclude libmpi -w {dest_dir} {wheel} &&
