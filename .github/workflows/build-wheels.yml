@@ -31,6 +31,11 @@ on:
         default: "main"
         type: string
 
+      adios2_ref:
+        description: "ADIOS2 git ref to build MPI wheels from"
+        default: "5a47aeefd748a086dc3a85d21fb88c1ae6aa2b4b"
+        type: string
+
   workflow_call:
     inputs:
       dolfinx_ref:
@@ -58,9 +63,76 @@ on:
         default: "main"
         type: string
 
+      adios2_ref:
+        description: "ADIOS2 git ref to build MPI wheels from"
+        default: "5a47aeefd748a086dc3a85d21fb88c1ae6aa2b4b"
+        type: string
+
 jobs:
+  build_adios2_wheels:
+    name: Build MPI ADIOS2 wheels
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            cibw_build: cp312-manylinux_x86_64
+          - os: ubuntu-24.04-arm
+            cibw_build: cp312-manylinux_aarch64
+
+    steps:
+      - uses: actions/setup-python@v7
+
+      - name: Install Python dependencies
+        run: python -m pip install cibuildwheel cmake
+
+      - name: Checkout ADIOS2
+        uses: actions/checkout@v7
+        with:
+          repository: shimwell/ADIOS2
+          path: adios2
+          ref: ${{ inputs.adios2_ref || github.event.inputs.adios2_ref }}
+          fetch-depth: 0
+
+      - name: Generate ADIOS2 version
+        working-directory: adios2
+        run: cmake -P scripts/ci/gh-actions/config/adios-version.cmake
+
+      - name: Build and test MPI ADIOS2 wheel
+        run: python -m cibuildwheel --output-dir wheelhouse/ adios2
+        env:
+          CIBW_BUILD: ${{ matrix.cibw_build }}
+          CIBW_BUILD_VERBOSITY: 1
+          CIBW_ARCHS_LINUX: native
+          CIBW_MANYLINUX_X86_64_IMAGE: quay.io/pypa/manylinux_2_34_x86_64:latest
+          CIBW_MANYLINUX_AARCH64_IMAGE: quay.io/pypa/manylinux_2_34_aarch64:latest
+          CIBW_BEFORE_ALL_LINUX: >
+            dnf -y install libcurl-devel openssl-devel libsodium-devel
+          CIBW_BEFORE_BUILD_LINUX: >
+            pip install build scikit-build-core cmake ninja numpy setuptools_scm
+            mpich mpi4py
+          CIBW_BUILD_FRONTEND: "build; args: -nx"
+          CIBW_CONFIG_SETTINGS_LINUX: >
+            cmake.define.ADIOS2_USE_MPI=ON
+            cmake.build-type=Release
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
+            auditwheel repair --exclude libmpi.so* -w {dest_dir} {wheel}
+          CIBW_TEST_REQUIRES: mpich mpi4py
+          CIBW_TEST_COMMAND_LINUX: >
+            python -c "import adios2; from mpi4py import MPI; assert adios2.bindings.is_built_with_mpi; adios2.bindings.ADIOS(MPI.COMM_WORLD)" &&
+            mpiexec -n 2 python -c "import adios2; from mpi4py import MPI; assert adios2.bindings.is_built_with_mpi; adios2.bindings.ADIOS(MPI.COMM_WORLD)"
+
+      - name: Upload ADIOS2 wheelhouse artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheelhouse-adios2-${{ matrix.os }}
+          path: wheelhouse/*
+
   build_wheels:
     name: Build wheels
+    needs: build_adios2_wheels
     runs-on: ${{ matrix.os }}
     # GitHub kills a job at 360 min with no usable diagnostics. Stop
     # short of that so a hang reports as a clean failure.
@@ -92,6 +164,14 @@ jobs:
 
       - name: Install Python dependencies
         run: python -m pip install cibuildwheel simple503 build
+
+      - name: Download ADIOS2 wheels
+        if: runner.os == 'Linux'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: wheelhouse-adios2-*
+          path: adios2-wheels/
+          merge-multiple: true
 
       - name: Checkout UFL
         if: ${{ github.event.inputs.build_fenicsx_stack == 'true' }}
@@ -134,7 +214,11 @@ jobs:
           python -m cibuildwheel --output-dir ../wheelhouse/ .
 
       - name: Make temporary simple503 repo directories
-        run: mkdir -p wheelhouse/ simple/ petsc-wheels/
+        run: |
+          mkdir -p wheelhouse/ simple/ petsc-wheels/
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            cp adios2-wheels/*.whl simple/
+          fi
 
       - name: Add wheels to simple503 repository (if built)
         if: ${{ github.event.inputs.build_fenicsx_stack == 'true' }}
@@ -227,8 +311,8 @@ jobs:
               -DTPL_ENABLE_LAPACKLIB=ON &&
             cmake --build superlu_dist-build-dir/ &&
             cmake --install superlu_dist-build-dir/ &&
-            curl -L https://github.com/ornladios/ADIOS2/archive/refs/tags/v2.10.2.tar.gz | tar -xz &&
-            cmake -G Ninja -S ADIOS2-2.10.2 -B adios2-build-dir/ \
+            curl -L https://github.com/ornladios/ADIOS2/archive/refs/tags/v2.12.1.tar.gz | tar -xz &&
+            cmake -G Ninja -S ADIOS2-2.12.1 -B adios2-build-dir/ \
               -DCMAKE_INSTALL_PREFIX=/usr/local \
               -DCMAKE_BUILD_TYPE=Release \
               -DBUILD_SHARED_LIBS=ON \
@@ -391,13 +475,14 @@ jobs:
           CIBW_TEST_GROUPS: test
           CIBW_BEFORE_TEST_LINUX: >
             pip install mpich mpi4py &&
+            pip install --no-index --find-links=/project/simple adios2 &&
             pip install --no-index --find-links=/petsc-wheels petsc petsc4py
           CIBW_BEFORE_TEST_MACOS: >
             pip install openmpi mpi4py &&
             pip install --no-index --find-links=$GITHUB_WORKSPACE/petsc-wheels petsc petsc4py
           CIBW_TEST_COMMAND_LINUX: >
-            timeout -k 60 1800 python -m pytest -n auto -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit &&
-            timeout -k 60 1200 mpiexec -n 2 python -m pytest -v -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit
+            timeout -k 60 1800 python -m pytest -n auto -k "not test_mixed_system" {project}/dolfinx/python/test/unit &&
+            timeout -k 60 1200 mpiexec -n 2 python -m pytest -v -k "not test_mixed_system" {project}/dolfinx/python/test/unit
           CIBW_TEST_COMMAND_MACOS: >
             export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib${DYLD_LIBRARY_FALLBACK_PATH:+:${DYLD_LIBRARY_FALLBACK_PATH}}" &&
             mpiexec -n 1 python -m pytest --timeout=900 --timeout-method=thread -n auto -m "not adios2" -k "not test_mixed_system" {project}/dolfinx/python/test/unit &&
@@ -445,7 +530,7 @@ jobs:
           sudo git clean -fdx && cd ../ &&
           docker run -v $(pwd)/dolfinx:/dolfinx -v $(pwd)/simple:/shared \
             --env PIP_INDEX_URL=file:///shared --env PIP_EXTRA_INDEX_URL=https://pypi.org/simple python:3.13 \
-            /bin/bash -l -c "pip install --pre --group /dolfinx/python/pyproject.toml:test pytest-timeout mpich petsc 'fenics-dolfinx[petsc4py]' && timeout -k 60 1200 mpiexec -n 2 python -m pytest -v -m 'not adios2' -k 'not test_mixed_system' /dolfinx/python/test/unit"
+            /bin/bash -l -c "pip install --pre --group /dolfinx/python/pyproject.toml:test pytest-timeout mpich petsc adios2 'fenics-dolfinx[petsc4py]' && timeout -k 60 1200 mpiexec -n 2 python -m pytest -v -k 'not test_mixed_system' /dolfinx/python/test/unit"
 
       # Disabled on this branch: PETSc is built against the PyPI MPICH, and
       # its configure enables MPIX_STREAM because MPICH provides the enqueue
@@ -488,7 +573,7 @@ jobs:
 
   combined_repository:
     name: Create combined simple503 repository
-    needs: build_wheels
+    needs: [build_adios2_wheels, build_wheels]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-python@v7
