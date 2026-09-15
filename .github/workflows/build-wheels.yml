@@ -449,6 +449,7 @@ jobs:
           # on macOS SDK 15.
           CIBW_CONFIG_SETTINGS_LINUX: >
             cmake.args="-DCMAKE_PREFIX_PATH=/opt/python/cp312-cp312;/usr/local"
+            cmake.define.DOLFINX_BUNDLE_CPP_LIBRARY=ON
             wheel.py-api=cp312
             cmake.build-type="Release"
           CIBW_CONFIG_SETTINGS_MACOS: >
@@ -463,11 +464,10 @@ jobs:
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
             export LD_LIBRARY_PATH=$(python -c "import site; print(site.getsitepackages()[0] + '/fenics_basix.libs')"):${LD_LIBRARY_PATH} &&
             python -m pip install --quiet wheel &&
-            auditwheel repair --exclude libmpi.so* --exclude libpetsc.so* -w {dest_dir} {wheel} &&
+            auditwheel repair --exclude libmpi.so* --exclude libpetsc.so* --exclude libdolfinx.so* -w {dest_dir} {wheel} &&
             wheel unpack {dest_dir}/*.whl -d {dest_dir}/unpacked &&
             rm {dest_dir}/*.whl &&
             find {dest_dir}/unpacked -name "*.so*" -type f | xargs -I% patchelf --add-rpath '$ORIGIN/../petsc/lib' % &&
-            bash /project/dolfinx/.github/scripts/restore-dolfinx-soname.sh {dest_dir}/unpacked/* &&
             wheel pack {dest_dir}/unpacked/* -d {dest_dir} &&
             pipx run abi3audit --verbose --strict --report {wheel}
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
@@ -483,13 +483,14 @@ jobs:
           CIBW_TEST_REQUIRES: pytest-xdist pytest-timeout
           CIBW_TEST_GROUPS: test
           CIBW_BEFORE_TEST_LINUX: >
-            pip install mpich mpi4py &&
+            pip install mpich mpi4py numpy &&
             pip install --no-index --find-links=/project/simple adios2 &&
-            pip install --no-index --find-links=/petsc-wheels petsc petsc4py
+            pip install --no-index --find-links=/petsc-wheels petsc petsc4py scifem
           CIBW_BEFORE_TEST_MACOS: >
             pip install openmpi mpi4py &&
             pip install --no-index --find-links=$GITHUB_WORKSPACE/petsc-wheels petsc petsc4py
           CIBW_TEST_COMMAND_LINUX: >
+            python -c "import scifem" &&
             timeout -k 60 1800 python -m pytest -n auto -k "not test_mixed_system" {project}/dolfinx/python/test/unit &&
             timeout -k 60 1200 mpiexec -n 2 python -m pytest -v -k "not test_mixed_system" {project}/dolfinx/python/test/unit
           CIBW_TEST_COMMAND_MACOS: >
