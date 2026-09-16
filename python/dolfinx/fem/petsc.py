@@ -1814,11 +1814,22 @@ def get_petsc_lib() -> pathlib.Path:
     petsc_version = PETSc.Sys.getVersion()
     major_minor_version = ".".join(str(v) for v in petsc_version[:2])
     major_minor_patch_version = ".".join(str(v) for v in petsc_version[:3])
+    # An unreleased PETSc zero pads the minor version in the library
+    # name, so 3.25 is built as libpetsc.so.3.025, keeping development
+    # libraries distinct from released ones
+    dev_major_minor_version = f"{petsc_version[0]}.{petsc_version[1]:03d}"
+    dev_major_minor_patch_version = f"{dev_major_minor_version}.{petsc_version[2]}"
     candidate_paths = [
         os.path.join(petsc_dir, petsc_arch, "lib", f"libpetsc.so.{major_minor_patch_version}"),
         os.path.join(petsc_dir, petsc_arch, "lib", f"libpetsc.{major_minor_patch_version}.dylib"),
         os.path.join(petsc_dir, petsc_arch, "lib", f"libpetsc.so.{major_minor_version}"),
         os.path.join(petsc_dir, petsc_arch, "lib", f"libpetsc.{major_minor_version}.dylib"),
+        os.path.join(petsc_dir, petsc_arch, "lib", f"libpetsc.so.{dev_major_minor_patch_version}"),
+        os.path.join(
+            petsc_dir, petsc_arch, "lib", f"libpetsc.{dev_major_minor_patch_version}.dylib"
+        ),
+        os.path.join(petsc_dir, petsc_arch, "lib", f"libpetsc.so.{dev_major_minor_version}"),
+        os.path.join(petsc_dir, petsc_arch, "lib", f"libpetsc.{dev_major_minor_version}.dylib"),
         os.path.join(petsc_dir, petsc_arch, "lib", "libpetsc.so"),
         os.path.join(petsc_dir, petsc_arch, "lib", "libpetsc.dylib"),
     ]
