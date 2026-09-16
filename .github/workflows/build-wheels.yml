@@ -32,8 +32,8 @@ on:
         type: string
 
       adios2_ref:
-        description: "ADIOS2 git ref to build MPI wheels from"
-        default: "5a47aeefd748a086dc3a85d21fb88c1ae6aa2b4b"
+        description: "Upstream ADIOS2 git ref to build MPI wheels from"
+        default: "9e290ba6a23a7572cbd5baf4a07353f2b878f8c9"
         type: string
 
   workflow_call:
@@ -64,8 +64,8 @@ on:
         type: string
 
       adios2_ref:
-        description: "ADIOS2 git ref to build MPI wheels from"
-        default: "5a47aeefd748a086dc3a85d21fb88c1ae6aa2b4b"
+        description: "Upstream ADIOS2 git ref to build MPI wheels from"
+        default: "9e290ba6a23a7572cbd5baf4a07353f2b878f8c9"
         type: string
 
 jobs:
@@ -91,7 +91,7 @@ jobs:
       - name: Checkout ADIOS2
         uses: actions/checkout@v7
         with:
-          repository: shimwell/ADIOS2
+          repository: ornladios/ADIOS2
           path: adios2
           ref: ${{ inputs.adios2_ref || github.event.inputs.adios2_ref }}
           fetch-depth: 0
