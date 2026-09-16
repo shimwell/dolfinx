@@ -1,4 +1,4 @@
-name: Test consolidatewheels
+name: Demonstrate consolidatewheels limitation
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    name: Test versioned SONAME support
+    name: Confirm versioned SONAME is not discovered
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-python@v7
@@ -42,6 +42,6 @@ jobs:
                   "libbasix.so": "libbasix-deadbeef.so"
               }
 
-          print("Unversioned libbasix name: supported")
-          print("Versioned libdolfinx name: not discovered")
+          print("PASS: unversioned libbasix name is supported")
+          print("EXPECTED LIMITATION: versioned libdolfinx name is not discovered")
           PY
