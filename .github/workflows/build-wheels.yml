@@ -483,7 +483,7 @@ jobs:
           CIBW_TEST_REQUIRES: pytest-xdist pytest-timeout
           CIBW_TEST_GROUPS: test
           CIBW_BEFORE_TEST_LINUX: >
-            pip install mpich mpi4py &&
+            pip install mpich mpi4py numpy &&
             pip install --no-index --find-links=/project/simple adios2 &&
             pip install --no-index --find-links=/petsc-wheels petsc petsc4py
           CIBW_BEFORE_TEST_MACOS: >
