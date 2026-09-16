@@ -1,0 +1,47 @@
+name: Test consolidatewheels
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - shimwell/consolidate-wheels-experiment
+
+jobs:
+  test:
+    name: Test versioned SONAME support
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Test auditwheel library names
+        run: |
+          python -m pip install consolidatewheels==0.5
+          python - <<'PY'
+          import pathlib
+          import tempfile
+
+          from consolidatewheels.consolidate_linux import buildlibmap
+
+          with tempfile.TemporaryDirectory() as root:
+              libs = pathlib.Path(root) / "wheel.libs"
+              libs.mkdir()
+
+              # Unversioned libraries such as libbasix are supported.
+              (libs / "libbasix-deadbeef.so").touch()
+              library_map = buildlibmap([root])
+              assert library_map == {
+                  "libbasix.so": "libbasix-deadbeef.so"
+              }
+
+              # Versioned libraries such as libdolfinx are not discovered.
+              (libs / "libdolfinx-deadbeef.so.0.12.0.0").touch()
+              library_map = buildlibmap([root])
+              assert library_map == {
+                  "libbasix.so": "libbasix-deadbeef.so"
+              }
+
+          print("Unversioned libbasix name: supported")
+          print("Versioned libdolfinx name: not discovered")
+          PY
