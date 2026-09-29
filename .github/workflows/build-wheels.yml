@@ -262,17 +262,11 @@ jobs:
             PIP_EXTRA_INDEX_URL=file://$GITHUB_WORKSPACE/simple
             MACOSX_DEPLOYMENT_TARGET=$(xcrun --sdk macosx --show-sdk-version)
             CMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/dolfinx-install:$(brew --prefix)
-          # TODO revert to the PyPI petsc and petsc4py once 3.26 is released.
-          # petsc and petsc4py are built from petsc main below, rather than
-          # installed from PyPI, purely to pick up petsc!9573. Without it
-          # petsc4py.get_config() returns the PETSC_DIR recorded when the wheel
-          # was built, a pip build isolation directory that no longer exists, so
-          # dolfinx.fem.petsc.get_petsc_lib() cannot find libpetsc and
-          # test_petsc_custom_assembler.py fails to import. The fix is merged to
-          # petsc main and is in the 3.26 milestone, so once 3.26 is on PyPI
-          # this should go back to `pip wheel petsc` and `pip wheel petsc4py`,
-          # the petsc main clone should be dropped, and the --pre flags on the
-          # clean environment tests below are no longer needed.
+          # petsc and petsc4py need to be at least 3.26.0 for petsc!9573.
+          # Without it petsc4py.get_config() returns the PETSC_DIR recorded when
+          # the wheel was built, a pip build isolation directory that no longer
+          # exists, so dolfinx.fem.petsc.get_petsc_lib() cannot find libpetsc
+          # and test_petsc_custom_assembler.py fails to import.
           # https://gitlab.com/petsc/petsc/-/merge_requests/9573
           CIBW_BEFORE_BUILD_LINUX: >
             dnf -y update &&
@@ -337,10 +331,9 @@ jobs:
             printf '/usr/local/lib64\n/usr/local/lib\n' > /etc/ld.so.conf.d/dolfinx-wheel.conf && ldconfig &&
             pip -v install $(python -c "import tomllib; deps=tomllib.load(open('/project/dolfinx/python/pyproject.toml','rb'))['project']['dependencies']; print(' '.join(x for x in deps if 'fenics-basix' in x or 'fenics-ffcx' in x))") &&
             pip -v install scikit-build-core nanobind &&
-            git clone --depth 1 --branch main https://gitlab.com/petsc/petsc.git /petsc-src &&
             PETSC_CONFIGURE_OPTIONS="--with-debugging=0 --with-fc=0
             --download-f2cblaslapack --with-superlu_dist-dir=/usr/local"
-            pip -v wheel /petsc-src -w /petsc-wheels &&
+            pip -v wheel petsc==3.26.0 -w /petsc-wheels &&
             pip install --quiet wheel &&
             auditwheel repair --exclude libmpi.so* -w /petsc-repaired /petsc-wheels/petsc-*.whl &&
             rm /petsc-wheels/petsc-*.whl &&
@@ -349,11 +342,11 @@ jobs:
             wheel pack /petsc-unpacked/* -d /petsc-wheels &&
             pip -v install --no-index --find-links=/petsc-wheels petsc &&
             PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
-            PIP_FIND_LINKS=/petsc-wheels PIP_PRE=1 pip -v wheel /petsc-src/src/binding/petsc4py -w /petsc-wheels &&
+            PIP_FIND_LINKS=/petsc-wheels pip -v wheel petsc4py==3.26.0 -w /petsc-wheels &&
             pip -v install --no-index --find-links=/petsc-wheels petsc4py &&
             for PY in /opt/python/cp313-cp313 /opt/python/cp314-cp314; do
               PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
-              PIP_FIND_LINKS=/petsc-wheels PIP_PRE=1 $PY/bin/pip wheel /petsc-src/src/binding/petsc4py -w /petsc-wheels || exit 1;
+              PIP_FIND_LINKS=/petsc-wheels $PY/bin/pip wheel petsc4py==3.26.0 -w /petsc-wheels || exit 1;
             done &&
             pip install patchelf wheel &&
             for W in /petsc-wheels/petsc4py-*.whl; do
