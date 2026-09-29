@@ -268,6 +268,11 @@ jobs:
           # exists, so dolfinx.fem.petsc.get_petsc_lib() cannot find libpetsc
           # and test_petsc_custom_assembler.py fails to import.
           # https://gitlab.com/petsc/petsc/-/merge_requests/9573
+          # PETSC_DIR is deliberately not set when building petsc4py. With it
+          # set, petsc4py's setup.py drops petsc from Requires-Dist, so the
+          # wheel installs without libpetsc. Unset, the isolated build installs
+          # petsc from /petsc-wheels and petsc4py finds it through
+          # petsc.get_petsc_dir().
           CIBW_BEFORE_BUILD_LINUX: >
             dnf -y update &&
             dnf install -y dnf-plugins-core &&
@@ -341,11 +346,9 @@ jobs:
             find /petsc-unpacked -name "libpetsc.so.*" -type f | xargs -I% patchelf --add-rpath '$ORIGIN/../../../..' % &&
             wheel pack /petsc-unpacked/* -d /petsc-wheels &&
             pip -v install --no-index --find-links=/petsc-wheels petsc &&
-            PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
             PIP_FIND_LINKS=/petsc-wheels pip -v wheel petsc4py==3.26.0 -w /petsc-wheels &&
             pip -v install --no-index --find-links=/petsc-wheels petsc4py &&
             for PY in /opt/python/cp313-cp313 /opt/python/cp314-cp314; do
-              PETSC_DIR=$(python -c "import petsc; print(petsc.get_petsc_dir())")
               PIP_FIND_LINKS=/petsc-wheels $PY/bin/pip wheel petsc4py==3.26.0 -w /petsc-wheels || exit 1;
             done &&
             pip install patchelf wheel &&
