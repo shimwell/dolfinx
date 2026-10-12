@@ -1,4 +1,5 @@
-# Copyright (C) 2024 Garth N. Wells and Paul T. Kühner
+# Copyright (C) 2024-2026 Garth N. Wells, Paul T. Kühner and
+# Jørgen S. Dokken
 #
 # This file is part of DOLFINx (https://www.fenicsproject.org)
 #
@@ -213,6 +214,17 @@ class CoordinateElement(Generic[Real]):
         """Polynomial degree of the coordinate element."""
         return self._cpp_object.degree
 
+    @property
+    def is_discontinuous(self) -> bool:
+        """Whether the element is the discontinuous version of the element.
+
+        A discontinuous coordinate element associates all of its
+        degrees-of-freedom with the cell, so coordinate nodes are not
+        shared between cells and the geometry may be discontinuous
+        across cell facets.
+        """
+        return self._cpp_object.is_discontinuous
+
     def pull_back_working_size(self, gdim: int) -> int:
         """Compute the working array size required for pull back.
 
@@ -231,6 +243,7 @@ def coordinate_element(
     degree: int,
     variant: int = int(basix.LagrangeVariant.unset),
     dtype: npt.DTypeLike = np.float64,
+    discontinuous: bool = False,
 ) -> CoordinateElement:
     """Create a Lagrange CoordinateElement from element metadata.
 
@@ -241,12 +254,13 @@ def coordinate_element(
         degree: Polynomial degree of the coordinate element map.
         variant: Basix Lagrange variant (affects node placement).
         dtype: Scalar type for the coordinate element.
+        discontinuous: Continuity of the coordinate element.
 
     Returns:
         A coordinate element.
     """
     cpp_type = CoordinateElement.cpp_types[np.dtype(dtype)]
-    return CoordinateElement(cpp_type(celltype, degree, variant))
+    return CoordinateElement(cpp_type(celltype, degree, variant, discontinuous))
 
 
 @coordinate_element.register(basix.finite_element.FiniteElement)
@@ -309,7 +323,7 @@ class FiniteElement(Generic[Real]):
         """Return underlying Basix C++ element (if it exists).
 
         Raises:
-            Runtime error if Basix element does not exist.
+            RuntimeError: If a Basix element does not exist.
         """
         return cast(
             "basix._basixcpp.FiniteElement_float32 | basix._basixcpp.FiniteElement_float64",
@@ -322,14 +336,51 @@ class FiniteElement(Generic[Real]):
         return self._cpp_object.num_sub_elements
 
     @property
-    def value_shape(self) -> npt.NDArray[np.integer]:
-        """Value shape of the finite element field.
+    def physical_base_value_size(self) -> int:
+        """Number of physical components in one block of the field.
 
-        The value shape describes the shape of the finite element field,
-        e.g. ``{}`` for a scalar, ``{2}`` for a vector in 2D, ``{3, 3}``
-        for a rank-2 tensor in 3D, etc.
+        A blocked element repeats a scalar base element
+        {py:attr}<FiniteElement.block_size> times, so one block of
+        its field is a single scalar and this is 1. A non-blocked element
+        has a single block, so this is {py:attr}<FiniteElement.value_size>.
+
+        This is the size of the push-forward of one (non-blocked) basis
+        function, and hence the extent a buffer needs when it holds
+        physical values one block at a time. It is the physical
+        counterpart of {py:attr}<FiniteElement.reference_value_size>,
+        and equals it unless the element is Piola mapped on a manifold,
+        where it is `gdim` rather than `tdim`.
+        """
+        return self._cpp_object.physical_base_value_size
+
+    @property
+    def value_shape(self) -> npt.NDArray[np.integer]:
+        """Value shape of the finite element field in physical space.
+
+        The value shape describes the shape of the finite element field
+        after the basis has been pushed forward to a physical cell,
+        e.g. ``()`` for a scalar, ``(2,)`` for a vector in 2D,
+        ``(3, 3)`` for a rank-2 tensor in 3D. It always agrees with
+        ``FunctionSpace.value_shape``, which UFL derives from the
+        element's pullback and the geometric dimension.
+
+        It differs from :attr:`reference_value_shape` for blocked and
+        quadrature elements, and for a Piola-mapped element on a
+        manifold: Raviart-Thomas on a triangle embedded in 3D has value
+        shape ``(3,)`` and reference value shape ``(2,)``.
         """
         return self._cpp_object.value_shape
+
+    @property
+    def reference_value_shape(self) -> npt.NDArray[np.integer]:
+        """Value shape of the base element on the reference cell.
+
+        This is the shape Basix tabulates in, with any blocking
+        removed, so it is ``()`` for blocked and quadrature elements.
+        Use :attr:`value_shape` for anything user-facing; this is for
+        code that works with tabulated reference data.
+        """
+        return self._cpp_object.reference_value_shape
 
     @property
     def interpolation_points(self) -> npt.NDArray[Real]:
@@ -445,6 +496,7 @@ def finiteelement(
     cell_type: _cpp.mesh.CellType,
     ufl_e: basix.ufl._ElementBase,
     FiniteElement_dtype: npt.DTypeLike,
+    gdim: int,
 ) -> FiniteElement:
     """Create a DOLFINx element from a basix.ufl element.
 
@@ -453,18 +505,25 @@ def finiteelement(
         ufl_e: UFL element, holding quadrature rule and other properties of
             the selected element.
         FiniteElement_dtype: Geometry type of the element.
+        gdim: Geometric dimension of the mesh the element will be used
+            on. A Piola-mapped basis is pushed forward with a Jacobian
+            of shape ``(gdim, tdim)``, so on a manifold the element's
+            value shape in physical space is not its reference value
+            shape.
     """
     CppElement = FiniteElement.cpp_types[np.dtype(FiniteElement_dtype)]
 
     if ufl_e.is_mixed:
         elements = [
             finiteelement(
-                cell_type, cast(basix.ufl._ElementBase, e), FiniteElement_dtype
+                cell_type, cast(basix.ufl._ElementBase, e), FiniteElement_dtype, gdim
             )._cpp_object
             for e in ufl_e.sub_elements
         ]
         return FiniteElement(CppElement(elements))
     elif ufl_e.is_quadrature:
+        # Quadrature elements are identity mapped, so the reference
+        # value shape is also the physical value shape.
         return FiniteElement(
             CppElement(
                 cell_type,
@@ -475,5 +534,5 @@ def finiteelement(
         )
     else:
         basix_e = ufl_e.basix_element._e
-        value_shape = ufl_e.reference_value_shape if ufl_e.block_size > 1 else None
-        return FiniteElement(CppElement(basix_e, value_shape, ufl_e.is_symmetric))
+        block_shape = ufl_e.reference_value_shape if ufl_e.block_size > 1 else None
+        return FiniteElement(CppElement(basix_e, gdim, block_shape, ufl_e.is_symmetric))

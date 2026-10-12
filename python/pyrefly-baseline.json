@@ -43,20 +43,6 @@
       "severity": "error"
     },
     {
-      "column": 52,
-      "path": "dolfinx/fem/petsc.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `int` is not assignable to parameter `insert_mode` with type `InsertMode` in function `dolfinx.la.petsc._ghost_update`",
-      "severity": "error"
-    },
-    {
-      "column": 74,
-      "path": "dolfinx/fem/petsc.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `int` is not assignable to parameter `scatter_mode` with type `ScatterMode` in function `dolfinx.la.petsc._ghost_update`",
-      "severity": "error"
-    },
-    {
       "column": 48,
       "path": "dolfinx/geometry.py",
       "name": "no-matching-overload",
@@ -71,10 +57,10 @@
       "severity": "error"
     },
     {
-      "column": 41,
+      "column": 48,
       "path": "dolfinx/io/gmsh.py",
       "name": "no-matching-overload",
-      "concise_description": "No matching overload found for function `dolfinx.cpp.mesh.create_mesh` called with arguments: (Comm, list[ndarray[tuple[int], dtype[signedinteger[_64Bit]]]], list[CoordinateElement_float32 | CoordinateElement_float64], ndarray, ((Comm, int, AdjacencyList_int64, ndarray[tuple[Any, ...], dtype[signedinteger[_32Bit]]] | None, ndarray[tuple[Any, ...], dtype[signedinteger[_32Bit]]] | None, bool) -> AdjacencyList_int32) | None, GhostMode, int, Literal[1], cell_weights=None, reorder_fn=None)",
+      "concise_description": "No matching overload found for function `dolfinx.cpp.mesh._create_mixed_mesh` called with arguments: (Comm, list[ndarray[tuple[int], dtype[signedinteger[_64Bit]]]], list[CoordinateElement_float32 | CoordinateElement_float64], ndarray, ((Comm, int, AdjacencyList_int64, ndarray[tuple[Any, ...], dtype[signedinteger[_32Bit]]] | None, ndarray[tuple[Any, ...], dtype[signedinteger[_32Bit]]] | None, bool) -> AdjacencyList[signedinteger[_32Bit]] | AdjacencyList_int32) | None, GhostMode, int, Literal[1], cell_weights=None, reorder_fn=None)",
       "severity": "error"
     },
     {

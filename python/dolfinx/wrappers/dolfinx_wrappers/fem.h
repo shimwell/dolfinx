@@ -1,4 +1,5 @@
-// Copyright (C) 2017-2026 Chris Richardson and Garth N. Wells
+// Copyright (C) 2017-2026 Chris Richardson, Garth N. Wells and Jørgen S.
+// Dokken
 //
 // This file is part of DOLFINx (https://www.fenicsproject.org)
 //
@@ -23,9 +24,14 @@
 #include <dolfinx/fem/Function.h>
 #include <dolfinx/fem/FunctionSpace.h>
 #include <dolfinx/fem/dofmapbuilder.h>
+#include <dolfinx/fem/expression_evaluate.h>
+#include <dolfinx/fem/expression_factory.h>
+#include <dolfinx/fem/form_factory.h>
+#include <dolfinx/fem/functionspace_factory.h>
 #include <dolfinx/fem/interpolate.h>
+#include <dolfinx/fem/interpolate_geometry.h>
 #include <dolfinx/fem/sparsitybuild.h>
-#include <dolfinx/fem/utils.h>
+#include <dolfinx/fem/sparsitypattern.h>
 #include <dolfinx/mesh/EntityMap.h>
 #include <dolfinx/mesh/Mesh.h>
 #include <format>
@@ -137,14 +143,14 @@ void declare_function_space(nb::module_& m, std::string type)
         .def(
             "__init__",
             [](dolfinx::fem::FiniteElement<T>* self,
-               basix::FiniteElement<T>& element,
+               basix::FiniteElement<T>& element, std::size_t gdim,
                const std::optional<std::vector<std::size_t>>& block_shape,
                bool symmetric)
             {
-              new (self) dolfinx::fem::FiniteElement<T>(element, block_shape,
-                                                        symmetric);
+              new (self) dolfinx::fem::FiniteElement<T>(element, gdim,
+                                                        block_shape, symmetric);
             },
-            nb::arg("element"), nb::arg("block_shape").none(),
+            nb::arg("element"), nb::arg("gdim"), nb::arg("block_shape").none(),
             nb::arg("symmetric"), "Single Basix element constructor.")
         .def(
             "__init__",
@@ -192,6 +198,21 @@ void declare_function_space(nb::module_& m, std::string type)
                                                                {vshape.size()});
             },
             nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "reference_value_shape",
+            [](const dolfinx::fem::FiniteElement<T>& self)
+            {
+              std::span<const std::size_t> vshape
+                  = self.reference_value_shape();
+              return nb::ndarray<const std::size_t, nb::numpy>(vshape.data(),
+                                                               {vshape.size()});
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro("value_size", &dolfinx::fem::FiniteElement<T>::value_size)
+        .def_prop_ro("physical_base_value_size",
+                     &dolfinx::fem::FiniteElement<T>::physical_base_value_size)
+        .def_prop_ro("reference_value_size",
+                     &dolfinx::fem::FiniteElement<T>::reference_value_size)
         .def("interpolation_points",
              [](const dolfinx::fem::FiniteElement<T>& self)
              {
@@ -654,7 +675,7 @@ void declare_objects(nb::module_& m, std::string type)
               self.interpolate(u0, span(*cells0), span(*cells1));
             else
             {
-              throw std::runtime_error(
+              throw std::invalid_argument(
                   "If cells1 is provided, cells0 must also be provided.");
             }
           },
@@ -735,14 +756,14 @@ void declare_objects(nb::module_& m, std::string type)
           {
             auto span = [](auto& x) { return std::span(x.data(), x.size()); };
             if (!cells0.has_value() and !cells1.has_value())
-              self.interpolate(e0);
+              dolfinx::fem::interpolate(self, e0);
             else if (cells0.has_value() and !cells1.has_value())
-              self.interpolate(e0, span(*cells0));
+              dolfinx::fem::interpolate(self, e0, span(*cells0));
             else if (cells0.has_value() and cells1.has_value())
-              self.interpolate(e0, span(*cells0), span(*cells1));
+              dolfinx::fem::interpolate(self, span(*cells1), e0, span(*cells0));
             else
             {
-              throw std::runtime_error(
+              throw std::invalid_argument(
                   "If cells1 is provided, cells0 must also be provided.");
             }
           },
@@ -840,8 +861,10 @@ void declare_objects(nb::module_& m, std::string type)
               argument_space);
         }
         else
-          throw std::runtime_error(
+        {
+          throw std::invalid_argument(
               "create_expression requires geometry type scalar_value_t<T>.");
+        }
       },
       nb::arg("expression"), nb::arg("coefficients"), nb::arg("constants"),
       nb::arg("entity_maps"), nb::arg("argument_space").none(),
@@ -946,8 +969,10 @@ void declare_form(nb::module_& m, std::string type)
                       ptr_to_ref_wrapper_vec(entity_maps), mesh));
             }
             else
-              throw std::runtime_error(
+            {
+              throw std::invalid_argument(
                   "create_form requires geometry type scalar_value_t<T>.");
+            }
           },
           nb::arg("form"), nb::arg("spaces"), nb::arg("coefficients"),
           nb::arg("constants"), nb::arg("subdomains"), nb::arg("entity_maps"),
@@ -1028,8 +1053,10 @@ void declare_form(nb::module_& m, std::string type)
               {*p}, spaces, coefficients, constants, sd, {}, std::move(mesh));
         }
         else
-          throw std::runtime_error(
+        {
+          throw std::invalid_argument(
               "create_form requires geometry type scalar_value_t<T>.");
+        }
       },
       nb::arg("form"), nb::arg("spaces"), nb::arg("coefficients"),
       nb::arg("constants"), nb::arg("subdomains"), nb::arg("mesh"),
@@ -1073,8 +1100,10 @@ void declare_form(nb::module_& m, std::string type)
               ptr_to_ref_wrapper_vec(entity_maps), std::move(mesh));
         }
         else
-          throw std::runtime_error(
+        {
+          throw std::invalid_argument(
               "create_form requires geometry type scalar_value_t<T>.");
+        }
       },
       // NOLINTEND(performance-no-int-to-ptr)
       nb::arg("form"), nb::arg("spaces"), nb::arg("coefficients"),
@@ -1101,18 +1130,22 @@ void declare_coordinate_element(nb::module_& m, const std::string& type)
       .def(
           "__init__",
           [](dolfinx::fem::CoordinateElement<T>* cm, dolfinx::mesh::CellType ct,
-             int d, int var)
+             int d, int var, bool discontinuous)
           {
             new (cm) dolfinx::fem::CoordinateElement<T>(
-                ct, d, static_cast<basix::element::lagrange_variant>(var));
+                ct, d, static_cast<basix::element::lagrange_variant>(var),
+                discontinuous);
           },
-          nb::arg("celltype"), nb::arg("degree"), nb::arg("variant"))
+          nb::arg("celltype"), nb::arg("degree"), nb::arg("variant"),
+          nb::arg("discontinuous"))
       .def_prop_ro("dtype", [](const dolfinx::fem::CoordinateElement<T>&)
                    { return dolfinx_wrappers::numpy_dtype_v<T>; })
       .def("create_dof_layout",
            &dolfinx::fem::CoordinateElement<T>::create_dof_layout)
       .def_prop_ro("degree", &dolfinx::fem::CoordinateElement<T>::degree)
       .def_prop_ro("dim", &dolfinx::fem::CoordinateElement<T>::dim)
+      .def_prop_ro("is_discontinuous",
+                   &dolfinx::fem::CoordinateElement<T>::is_discontinuous)
       .def_prop_ro("variant", [](const dolfinx::fem::CoordinateElement<T>& self)
                    { return static_cast<int>(self.variant()); })
       .def("hash", &dolfinx::fem::CoordinateElement<T>::hash)
@@ -1186,7 +1219,7 @@ void declare_coordinate_element(nb::module_& m, const std::string& type)
             std::size_t working_size = self.pull_back_working_size(gdim);
             if (working_array.size() < working_size)
             {
-              throw std::runtime_error(
+              throw std::invalid_argument(
                   std::format("Working memory is too small for pull_back, "
                               "got {}, need {}.",
                               working_array.size(), working_size));

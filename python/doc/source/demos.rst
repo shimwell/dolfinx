@@ -41,6 +41,9 @@ Mixed and hybridised formulations
 
 * :doc:`demos/demo_mixed-poisson` -- solve the Poisson equation in mixed
   (flux, potential) form with a block-preconditioned iterative solver.
+* :doc:`demos/demo_manifold` -- solve the Poisson equation in mixed form
+  on the sphere, a manifold, with Raviart-Thomas elements on a
+  consistently oriented surface mesh.
 * :doc:`demos/demo_stokes` -- solve the Stokes equations with Taylor-Hood
   elements, comparing five block and monolithic solver strategies.
 * :doc:`demos/demo_navier-stokes` -- solve the Navier-Stokes equations
@@ -76,6 +79,10 @@ Linear solvers, preconditioners and matrix-free methods
 * :doc:`demos/demo_mixed-poisson` -- see *Mixed and hybridised
   formulations*: a block-preconditioned solver, including a Hypre AMS
   preconditioner for :math:`H(\mathrm{div})`.
+* :doc:`demos/demo_dd-solvers` -- solve the Poisson, linearised
+  elasticity and curl-curl equations with BDDC and PCHPDDM domain
+  decomposition preconditioners, using PETSc's unassembled ``MATIS``
+  matrix format.
 * :doc:`demos/demo_poisson-matrix-free` -- solve the Poisson equation
   with a matrix-free conjugate gradient solver.
 * :doc:`demos/demo_matrix-free-petsc` -- solve a blocked projection
@@ -106,6 +113,8 @@ Mesh generation, partitioning and parallel data
   communication pattern of a distributed mesh with NetworkX.
 * :doc:`demos/demo_mixed-topology` -- solve a Helmholtz problem on a
   mesh with mixed cell topology (in development, serial only).
+* :doc:`demos/demo_manifold` -- see *Mixed and hybridised formulations*:
+  extract a surface mesh from a Gmsh volume mesh and orient its cells.
 
 
 Electromagnetics
@@ -137,6 +146,7 @@ PETSc scalars.
    demos/demo_helmholtz.md
    demos/demo_biharmonic.md
    demos/demo_mixed-poisson.md
+   demos/demo_manifold.md
    demos/demo_stokes.md
    demos/demo_navier-stokes.md
    demos/demo_hdg.md
@@ -148,6 +158,7 @@ PETSc scalars.
    demos/demo_axis.md
    demos/demo_elasticity.md
    demos/demo_pyamg.md
+   demos/demo_dd-solvers.md
    demos/demo_poisson-matrix-free.md
    demos/demo_matrix-free-petsc.md
    demos/demo_types.md

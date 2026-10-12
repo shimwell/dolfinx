@@ -17,6 +17,7 @@
 #include <complex>
 #include <concepts>
 #include <cstdint>
+#include <format>
 #include <iterator>
 #include <numeric>
 #include <ranges>
@@ -399,6 +400,65 @@ public:
 private:
   // Created contiguous type, or MPI_DATATYPE_NULL if none was created
   MPI_Datatype _type = MPI_DATATYPE_NULL;
+};
+
+/// @brief Holder for the request of a non-blocking operation.
+///
+/// `MPI_Request` is a plain handle, so a class storing one bare cannot
+/// use a defaulted move: the moved-from object would be left naming the
+/// same request as the target. This holder transfers the request on
+/// move and leaves the source null, which keeps the owner's own move
+/// operations `= default` and correct as members are added.
+///
+/// Copying does not transfer a request in flight -- the new request is
+/// null -- so a copied owner does not wait on an operation it did not
+/// start. The owner's copy operations therefore stay usable.
+///
+/// @note Nothing is released on destruction. A request is consumed by
+/// the `MPI_Wait` that completes it, which the owner is responsible
+/// for.
+class Request
+{
+public:
+  /// Create a null request
+  Request() = default;
+
+  /// Copy constructor. The copy has no request in flight.
+  Request(const Request&) noexcept {}
+
+  /// Move constructor
+  Request(Request&& request) noexcept
+      : _request(std::exchange(request._request, MPI_REQUEST_NULL))
+  {
+  }
+
+  /// Destructor
+  ~Request() = default;
+
+  /// Copy assignment. Leaves this with no request in flight.
+  Request& operator=(const Request&) noexcept
+  {
+    _request = MPI_REQUEST_NULL;
+    return *this;
+  }
+
+  /// Move assignment
+  Request& operator=(Request&& request) noexcept
+  {
+    _request = std::exchange(request._request, MPI_REQUEST_NULL);
+    return *this;
+  }
+
+  /// @brief The handle to pass to MPI.
+  /// @return Request, `MPI_REQUEST_NULL` if no operation is in flight.
+  MPI_Request& request() noexcept { return _request; }
+
+  /// @brief The handle.
+  /// @return Request, `MPI_REQUEST_NULL` if no operation is in flight.
+  const MPI_Request& request() const noexcept { return _request; }
+
+private:
+  MPI_Request _request = MPI_REQUEST_NULL;
 };
 
 //---------------------------------------------------------------------------
@@ -841,6 +901,23 @@ distribute_data(MPI_Comm comm0, std::span<const std::int64_t> indices,
   int err
       = MPI_Allreduce(&shape0_local, &shape0, 1, MPI_INT64_T, MPI_SUM, comm0);
   dolfinx::MPI::check_error(comm0, err);
+
+#ifndef NDEBUG
+  {
+    int invalid_local = !std::ranges::all_of(indices, [shape0](std::int64_t i)
+                                             { return i >= 0 and i < shape0; });
+    int invalid = 0;
+    err = MPI_Allreduce(&invalid_local, &invalid, 1, MPI_INT, MPI_MAX, comm0);
+    dolfinx::MPI::check_error(comm0, err);
+    if (invalid)
+    {
+      throw std::out_of_range(
+          std::format("distribute_data: index outside the global row range "
+                      "[0, {}) of the distributed data.",
+                      shape0));
+    }
+  }
+#endif
 
   std::int64_t rank_offset = -1;
   if (comm1 != MPI_COMM_NULL)

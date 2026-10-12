@@ -83,6 +83,7 @@ __all__ = [
     "create_unit_square",
     "entities_to_geometry",
     "exterior_facet_indices",
+    "extract_cells_from_entities",
     "is_simplex",
     "locate_entities",
     "locate_entities_boundary",
@@ -297,8 +298,8 @@ class Topology:
             topology: The C++ topology object
 
         Note:
-            Topology objects should usually be constructed with the
-            :func:`dolfinx.cpp.mesh.create_topology` and not this class
+            Topology objects should usually be constructed with
+            ``dolfinx.cpp.mesh.create_topology`` and not this class
             initializer.
         """
         self._cpp_object = topology
@@ -371,7 +372,7 @@ class Topology:
 
         Args:
             dim: Topological dimension of entities to create.
-            num_threads: Number of CPU threads to use. Must be >= 1.
+            num_threads: Number of threads to use. Must be >= 1.
 
         Returns:
             ``True` is entities are created, ``False`` is if entities
@@ -379,13 +380,52 @@ class Topology:
         """
         return self._cpp_object.create_entities(dim, num_threads)
 
-    def create_entity_permutations(self, num_threads: int = 1) -> None:
-        """Compute entity permutations and reflections.
+    def create_entity_permutations(self, dim: int, num_threads: int = 1) -> None:
+        """Compute permutations of cell-local entities of a dimension.
+
+        A permutation records how an entity is oriented as seen from a
+        cell, relative to a low-to-high ordering of the entity's global
+        vertex indices. It is passed to FFCx kernels as
+        ``quadrature_permutation``, so that cells sharing an entity
+        agree on the order of the quadrature points on it. Which
+        dimension is needed is a property of the integral, not of the
+        element: an interior facet integral needs ``tdim - 1``, a ridge
+        integral ``tdim - 2``.
+
+        See also :meth:`~dolfinx.mesh.Topology.create_cell_permutations`,
+        which packs the orientations of all of a cell's sub-entities into
+        one integer per cell, for correcting element DOFs rather than
+        quadrature points.
 
         Args:
-            num_threads: Number of CPU threads to use. Must be >= 1.
+            dim: Topological dimension of the entities, e.g. ``tdim - 1``
+                for facets. Must satisfy ``0 <= dim < tdim``.
+            num_threads: Number of threads to use. Must be >= 1.
         """
-        self._cpp_object.create_entity_permutations(num_threads)
+        self._cpp_object.create_entity_permutations(dim, num_threads)
+
+    def create_cell_permutations(self, num_threads: int = 1) -> None:
+        """Compute the packed per-cell permutation info.
+
+        Encodes, for each cell, the orientation of every sub-entity of
+        that cell relative to a low-to-high ordering of global vertex
+        indices, packed into one 32-bit integer per cell. See
+        :meth:`~dolfinx.mesh.Topology.get_cell_permutation_info` for the
+        bit layout.
+
+        Required by elements whose DOF transformations are not the
+        identity. Where those transformations are permutations, e.g.
+        higher-order Lagrange, the correction is applied once to the
+        dofmap when it is built. Otherwise, e.g. N1curl and
+        Raviart-Thomas, it is applied to the element tensor on each cell
+        at assembly time; those are the elements for which
+        :attr:`dolfinx.fem.FiniteElement.needs_dof_transformations` is
+        ``True``.
+
+        Args:
+            num_threads: Number of threads to use. Must be >= 1.
+        """
+        self._cpp_object.create_cell_permutations(num_threads)
 
     @property
     def dim(self) -> int:
@@ -403,24 +443,110 @@ class Topology:
         The returned data is used for packing coefficients and
         assembling of tensors. The bits of each integer encodes the
         number of reflections and permutations for each sub-entity of
-        the cell to be able to map it to the reference element.
+        the cell to be able to map it to the reference element. The
+        most significant bit marks a reversed cell (see
+        :meth:`cell_orientations`).
         """
         return self._cpp_object.get_cell_permutation_info()
 
-    def get_facet_permutations(self) -> npt.NDArray[np.uint8]:
-        """Get the permutation integer to apply to facets.
+    def create_cell_orientations(self, orientations: npt.ArrayLike | None = None) -> None:
+        """Compute or set consistent orientation markers for manifolds.
 
-        The bits of each integer describes the number of reflections and
-        rotations that has to be applied to a facet to map between a
-        facet in the mesh (relative to a cell) and the corresponding
-        facet on the reference element. The data has the shape
-        ``(num_cells, num_facets_per_cell)``, flattened row-wise. The
-        number of cells include potential ghost cells.
+        The cells are not modified. On a surface, elements mapped by the
+        contravariant Piola map (e.g. Raviart-Thomas,
+        Brezzi-Douglas-Marini) are conforming only between cells whose
+        vertex orders give the same normal. On a manifold, these spaces
+        can therefore only be created once an orientation has been
+        computed or set with this call (see
+        :meth:`has_cell_orientations`). Lagrange and Nédélec spaces do
+        not need it. The result is read with :meth:`cell_orientations`.
+
+        If ``orientations`` is ``None``, one is computed from the vertex
+        orders alone, which additionally creates the edges it is computed
+        across. Which of its two orientations each connected surface gets
+        is then arbitrary, and depends on the partitioning. Pass
+        ``orientations`` when a consistent orientation is already known,
+        e.g. the outward normal of a closed surface; it is stored in the
+        same way, but is not checked for consistency between neighbouring
+        cells. On a mesh whose cells are consistently ordered, passing
+        all ``1`` keeps each cell's own vertex order.
+
+        Warning:
+            Changing the orientation after creating such spaces
+            invalidates existing :class:`dolfinx.fem.Function` data on
+            them, as their degrees-of-freedom are not corrected.
 
         Note:
-            The data can be unpacked with ``numpy.unpack_bits``.
+            Collective. The two branches do different collective work, so
+            ``orientations`` must be given on every rank or on none.
+
+        Args:
+            orientations: For each owned and ghost cell, ``-1`` if its
+                orientation is reversed relative to its vertex order and
+                ``1`` otherwise. A ghost cell must have the same
+                orientation as on its owner. If ``None``, a consistent
+                orientation is computed instead.
+
+        Raises:
+            ValueError: If the topological dimension is not 2, or
+                ``orientations`` does not have one entry per owned and
+                ghost cell.
+            RuntimeError: If no orientation is given and the surface is
+                not orientable, e.g. a Möbius strip, or an edge is shared
+                by more than two cells.
         """
-        return self._cpp_object.get_facet_permutations()
+        self._cpp_object.create_cell_orientations(
+            None if orientations is None else np.asarray(orientations, dtype=np.int8)
+        )
+
+    def cell_orientations(self) -> npt.NDArray[np.int8]:
+        """Get the orientation of each cell relative to its surface.
+
+        The orientation is set by :meth:`create_cell_orientations`.
+        Which of its two orientations each connected surface gets is
+        arbitrary, and depends on the partitioning. The basis functions
+        and the degrees-of-freedom change sign together, so the choice
+        changes no field.
+
+        Returns:
+            For each owned and ghost cell, ``-1`` if its orientation is
+            reversed and ``1`` otherwise. All ``1`` if no orientation has
+            been computed or set (see :meth:`has_cell_orientations`).
+
+        Raises:
+            RuntimeError: If the cell permutations have not been created
+                (see :meth:`create_cell_permutations`).
+        """
+        return self._cpp_object.cell_orientations()
+
+    def has_cell_orientations(self) -> bool:
+        """Check if a cell orientation has been computed or set.
+
+        Function spaces whose basis depends on the cell orientation, e.g.
+        Raviart-Thomas on a manifold, can only be created once it has
+        (see :meth:`create_cell_orientations`).
+        """
+        return self._cpp_object.has_cell_orientations()
+
+    def get_entity_permutations(self, dim: int) -> npt.NDArray[np.uint8]:
+        """Get the permutation integer for entities of a dimension.
+
+        The bits of each integer describe the number of rotations and
+        reflections to apply to an entity to map between the entity as
+        seen by a cell of the mesh and the corresponding entity on the
+        reference element. The data has the shape ``(num_cells,
+        num_entities_per_cell)``, flattened row-wise. The number of
+        cells includes potential ghost cells.
+
+        Args:
+            dim: Topological dimension of the entities, e.g. ``tdim - 1``
+                for facets.
+
+        Note:
+            :func:`create_entity_permutations` must be called with the
+            same ``dim`` first.
+        """
+        return self._cpp_object.get_entity_permutations(dim)
 
     def index_map(self, dim: int) -> _IndexMap:
         """Index map for the parallel distribution of the mesh entities.
@@ -649,7 +775,7 @@ def _mesh_from_ufl_domain(domain: ufl.Mesh) -> Mesh:
         return cargo
     if isinstance(cargo, _cpp.mesh.Mesh_float32 | _cpp.mesh.Mesh_float64):
         return Mesh(cargo, domain)
-    raise RuntimeError("Expecting to find a Mesh in the UFL domain.")
+    raise TypeError("Expecting to find a Mesh in the UFL domain.")
 
 
 class MeshTags:
@@ -824,6 +950,41 @@ def entity_map(
     )
 
 
+def extract_cells_from_entities(
+    topology_c: Topology,
+    topology: Topology,
+    entities: npt.NDArray[np.int32],
+    entity_map: EntityMap | None = None,
+) -> npt.NDArray[np.int32]:
+    """Map integration entities of a topology to cells of a related one.
+
+    Note:
+        For ``(cell, local entity index)`` pairs and a lower-dimensional
+        ``topology_c``, the connectivity of ``topology`` from its cells
+        to entities of dimension ``topology_c.dim`` must have been
+        computed.
+
+    Args:
+        topology_c: Topology to extract cell indices on.
+        topology: Topology that ``entities`` belong to.
+        entities: Integration entities. Either a list of cells of
+            ``topology``, or an array of shape ``(num_entities, 2)`` of
+            ``(cell, local entity index)`` pairs.
+        entity_map: Map between ``topology`` and ``topology_c``.
+            Required if ``topology_c`` is not ``topology``.
+
+    Returns:
+        Cell of ``topology_c`` for each of ``entities``, or -1 if there
+        is none.
+    """
+    return _cpp.mesh.extract_cells_from_entities(
+        topology_c._cpp_object,
+        topology._cpp_object,
+        entities,
+        None if entity_map is None else entity_map._cpp_object,
+    )
+
+
 def compute_incident_entities(
     topology: Topology, entities: npt.NDArray[np.int32], d0: int, d1: int
 ) -> npt.NDArray[np.int32]:
@@ -944,7 +1105,7 @@ def transfer_meshtag(
         )
         return MeshTags(mt)
     else:
-        raise RuntimeError("MeshTag transfer is supported on cells or facets.")
+        raise ValueError("MeshTag transfer is supported on cells or facets.")
 
 
 def uniform_refine(
@@ -1084,10 +1245,10 @@ def _get_mesh_partitioner(
         return partitioner_fn, None
     if isinstance(partitioner, tuple):
         if len(partitioner) != 2:
-            raise TypeError("partitioner tuple must have two entries.")
+            raise ValueError("partitioner tuple must have two entries.")
         partitioner_fn, cell_weights = partitioner
         if partitioner_fn is None:
-            raise TypeError("The partitioner in the tuple must not be None.")
+            raise ValueError("The partitioner in the tuple must not be None.")
         return _wrap_partitioner(partitioner_fn), cell_weights
     return _wrap_partitioner(partitioner), None
 
@@ -1211,7 +1372,7 @@ def _create_mesh_coordinate_element(
         return cmap, domain
     if isinstance(e, _CoordinateElement):
         return e, None
-    raise ValueError(f"Unsupported element type {type(e)}.")
+    raise TypeError(f"Unsupported element type {type(e)}.")
 
 
 def create_mesh(
@@ -1369,7 +1530,7 @@ def meshtags(
     elif values.dtype == np.float64:
         ftype = _cpp.mesh.MeshTags_float64
     else:
-        raise NotImplementedError(f"Type {values.dtype} not supported.")
+        raise TypeError(f"Type {values.dtype} not supported.")
 
     return MeshTags(
         ftype(msh.topology._cpp_object, dim, np.asarray(entities, dtype=np.int32), values, name)
@@ -1441,6 +1602,8 @@ def create_interval(
     Returns:
         An interval mesh.
     """
+    if not (np.issubdtype(dtype, np.float32) or np.issubdtype(dtype, np.float64)):
+        raise TypeError(f"Unsupported mesh geometry float type: {dtype}")
     if partitioner is None and comm.size > 1:
         partitioner = _cpp.graph.partitioner()
     partitioner = _wrap_partitioner(partitioner)
@@ -1457,10 +1620,8 @@ def create_interval(
     msh: _cpp.mesh.Mesh_float32 | _cpp.mesh.Mesh_float64
     if np.issubdtype(dtype, np.float32):
         msh = _cpp.mesh.create_interval_float32(comm, nx, points, ghost_mode, partitioner, gdim)  # type: ignore[arg-type]
-    elif np.issubdtype(dtype, np.float64):
-        msh = _cpp.mesh.create_interval_float64(comm, nx, points, ghost_mode, partitioner, gdim)  # type: ignore[arg-type]
     else:
-        raise RuntimeError(f"Unsupported mesh geometry float type: {dtype}")
+        msh = _cpp.mesh.create_interval_float64(comm, nx, points, ghost_mode, partitioner, gdim)  # type: ignore[arg-type]
 
     return Mesh(msh, domain)
 
@@ -1527,6 +1688,8 @@ def create_rectangle(
     Returns:
         A mesh of a rectangle.
     """
+    if not (np.issubdtype(dtype, np.float32) or np.issubdtype(dtype, np.float64)):
+        raise TypeError(f"Unsupported mesh geometry float type: {dtype}")
     if partitioner is None and comm.size > 1:
         partitioner = _cpp.graph.partitioner()
     partitioner = _wrap_partitioner(partitioner)
@@ -1552,7 +1715,7 @@ def create_rectangle(
             gdim,
             ghost_mode,
         )
-    elif np.issubdtype(dtype, np.float64):
+    else:
         msh = _cpp.mesh.create_rectangle_float64(
             comm,
             points,  # type: ignore[arg-type]
@@ -1563,8 +1726,6 @@ def create_rectangle(
             gdim,
             ghost_mode,
         )
-    else:
-        raise RuntimeError(f"Unsupported mesh geometry float type: {dtype}")
 
     return Mesh(msh, domain)
 
@@ -1640,6 +1801,8 @@ def create_box(
     Returns:
         A mesh of a box domain.
     """
+    if not (np.issubdtype(dtype, np.float32) or np.issubdtype(dtype, np.float64)):
+        raise TypeError(f"Unsupported mesh geometry float type: {dtype}")
     if partitioner is None and comm.size > 1:
         partitioner = _cpp.graph.partitioner()
     partitioner = _wrap_partitioner(partitioner)
@@ -1656,10 +1819,8 @@ def create_box(
     msh: _cpp.mesh.Mesh_float32 | _cpp.mesh.Mesh_float64
     if np.issubdtype(dtype, np.float32):
         msh = _cpp.mesh.create_box_float32(comm, points, n, cell_type, partitioner, ghost_mode)  # type: ignore[arg-type]
-    elif np.issubdtype(dtype, np.float64):
-        msh = _cpp.mesh.create_box_float64(comm, points, n, cell_type, partitioner, ghost_mode)  # type: ignore[arg-type]
     else:
-        raise RuntimeError(f"Unsupported mesh geometry float type: {dtype}")
+        msh = _cpp.mesh.create_box_float64(comm, points, n, cell_type, partitioner, ghost_mode)  # type: ignore[arg-type]
 
     return Mesh(msh, domain)
 
@@ -1714,7 +1875,7 @@ def entities_to_geometry(
         entities: Entity indices (local to the process).
         permute: Permute the DOFs such that they are consistent with the
             orientation of `dim`-dimensional mesh entities. This
-            requires `create_entity_permutations` to be called first.
+            requires `create_cell_permutations` to be called first.
 
     Returns:
         The geometric DOFs associated with the closure of the entities
@@ -1779,7 +1940,7 @@ def create_geometry(
             commonly from a mesh input file.
     """
     if x.dtype not in (np.float32, np.float64):
-        raise ValueError(f"Unknown floating type for geometry, got: {x.dtype}")
+        raise TypeError(f"Unknown floating type for geometry, got: {x.dtype}")
     if (dtype := np.dtype(element.dtype)) != x.dtype:
         raise ValueError(f"Mismatch in x dtype ({x.dtype}) and coordinate element ({dtype})")
 
@@ -1797,31 +1958,36 @@ def create_geometry(
             )
         )
     else:
-        raise ValueError(f"Unknown floating type for coordinate element, got: {dtype}")
+        raise TypeError(f"Unknown floating type for coordinate element, got: {dtype}")
 
 
 def transfer_meshtags_to_submesh(
     entity_tag: MeshTags,
     submesh: Mesh,
-    vertex_to_parent: EntityMap,
     cell_to_parent: EntityMap,
+    vertex_to_parent: EntityMap,
 ) -> MeshTags:
     """Transfer a ``entity_tag`` from a parent mesh to a ``submesh``.
+
+    The ``cell_to_parent``/``vertex_to_parent`` order matches the
+    ``(entity_map, vertex_map)`` order that :func:`create_submesh`
+    returns, so its result can be unpacked and passed straight through.
 
     Args:
         entity_tag: Tag to transfer
         submesh: Submesh to transfer tag to
+        cell_to_parent: Mapping from submesh cells to parent entities
         vertex_to_parent: Mapping from submesh vertices to parent
             mesh vertices
-        cell_to_parent: Mapping from submesh cells to parent entities
     Returns:
         The transferred meshtags object on the submesh.
     """
     dim = entity_tag.dim
     sub_tdim = submesh.topology.dim
     if dim > sub_tdim:
-        raise RuntimeError(
-            f"Cannot transfer meshtags of dimension {dim} to submesh with topological dimension"
+        raise ValueError(
+            f"Cannot transfer meshtags of dimension {dim} to submesh with topological "
+            f"dimension {sub_tdim}."
         )
 
     submesh.topology.create_connectivity(sub_tdim, sub_tdim)
@@ -1838,14 +2004,12 @@ def transfer_meshtags_to_submesh(
     elif dtype == np.float64:
         ftype = _cpp.mesh.transfer_meshtags_to_submesh_float64
     else:
-        raise NotImplementedError(
-            f"MeshTags with dtype {dtype} not supported for transfer to submesh."
-        )
+        raise TypeError(f"MeshTags with dtype {dtype} not supported for transfer to submesh.")
     cpp_tag = ftype(
         entity_tag._cpp_object,  # type: ignore[arg-type]
         submesh.topology._cpp_object,
-        vertex_to_parent._cpp_object,
         cell_to_parent._cpp_object,
+        vertex_to_parent._cpp_object,
     )
     return MeshTags(cpp_tag)
 
@@ -1860,6 +2024,9 @@ def create_point_mesh(comm: _MPI.Comm, points: npt.NDArray[np.float32 | np.float
         comm: MPI communicator to create the mesh on.
         points: Points local to the process in the mesh.
     """
+    if points.dtype not in (np.float32, np.float64):
+        raise TypeError(f"Unsupported dtype for mesh {points.dtype}")
+
     # Create topology which only has a 0->0 connectivity and dim 0 entities
     cells = np.arange(points.shape[0], dtype=np.int32).reshape(-1, 1)
     num_nodes_local = cells.shape[0]
@@ -1885,6 +2052,6 @@ def create_point_mesh(comm: _MPI.Comm, points: npt.NDArray[np.float32 | np.float
     elif isinstance(cpp_geometry, _cpp.mesh.Geometry_float32):
         cpp_mesh = _cpp.mesh.Mesh_float32(comm, topology, cpp_geometry)
     else:
-        raise RuntimeError(f"Unsupported dtype for mesh {points.dtype}")
+        raise TypeError(f"Unsupported dtype for mesh {points.dtype}")
 
     return Mesh(cpp_mesh, domain=ufl.Mesh(e))
