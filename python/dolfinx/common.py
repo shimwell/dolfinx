@@ -5,7 +5,7 @@
 # SPDX-License-Identifier:    LGPL-3.0-or-later
 """General tools for timing and configuration."""
 
-import datetime
+import datetime as dt
 import functools
 import typing
 from collections.abc import Callable, Sequence
@@ -54,6 +54,7 @@ __all__ = [
     "index_map",
     "list_timings",
     "local_range",
+    "num_sharing_ranks",
     "scatterer",
     "timed",
     "timing",
@@ -155,19 +156,21 @@ class IndexMap:
         """
         return self._cpp_object.owners
 
-    def index_to_dest_ranks(self, tag: int) -> tuple[npt.NDArray[np.int32], npt.NDArray[np.int32]]:
-        """Ranks that ghost each owned index, as an adjacency list.
+    def index_to_dest_ranks(self) -> tuple[npt.NDArray[np.int32], npt.NDArray[np.int32]]:
+        """Ranks sharing each local index, as an adjacency list.
 
-        Args:
-            tag: MPI tag used by the consensus exchange. Must be the
-                same on all ranks, and must not clash with another
-                in-flight exchange.
+        For an owned index, these are the ranks that ghost it; for a
+        ghost index, its owner and the other ranks that ghost it. The
+        calling rank is excluded.
+
+        Note:
+            Collective.
 
         Returns:
-            Ghosting ranks of each owned index, as a (data, offsets)
+            Sharing ranks of each local index, as a (data, offsets)
             pair.
         """
-        return self._cpp_object.index_to_dest_ranks(tag)
+        return self._cpp_object.index_to_dest_ranks()
 
     def local_to_global(self, local: npt.NDArray[np.int32]) -> npt.NDArray[np.int64]:
         """Map local indices to global indices.
@@ -463,6 +466,28 @@ def create_sub_index_map(
     return IndexMap(submap), submap_to_map, owners_changed
 
 
+def num_sharing_ranks(
+    imap: IndexMap, indices: npt.NDArray[np.int32], bs: int = 1
+) -> npt.NDArray[np.int32]:
+    """Number of processes sharing each of ``indices``, counting the owner.
+
+    A process shares an index if it owns it or ghosts it. The count is
+    one for an index held by a single process.
+
+    Note:
+        Collective.
+
+    Args:
+        imap: Index map the indices belong to.
+        indices: Local indices to count, unrolled by ``bs``.
+        bs: Block size relating ``indices`` to the blocks of ``imap``.
+
+    Returns:
+        The number of sharing processes, one per entry of ``indices``.
+    """
+    return _cpp.common.num_sharing_ranks(imap._cpp_object, indices, bs)
+
+
 def scatterer(index_map: IndexMap) -> Scatterer:
     """Create a scatterer for data with a layout described by an index map.
 
@@ -476,7 +501,7 @@ def scatterer(index_map: IndexMap) -> Scatterer:
     return Scatterer(_cpp.common.Scatterer(index_map._cpp_object))
 
 
-def timing(task: str) -> tuple[int, datetime.timedelta]:
+def timing(task: str) -> tuple[int, dt.timedelta]:
     """Return the logged elapsed time.
 
     Timing data is for the calling process.
@@ -570,7 +595,7 @@ class Timer:
         """Reset elapsed time and (re-)start timer."""
         self._cpp_object.start()
 
-    def stop(self) -> datetime.timedelta:
+    def stop(self) -> dt.timedelta:
         """Stop timer and return elapsed time.
 
         Returns:
@@ -582,7 +607,7 @@ class Timer:
         """Resume timer."""
         self._cpp_object.resume()
 
-    def elapsed(self) -> datetime.timedelta:
+    def elapsed(self) -> dt.timedelta:
         """Return elapsed time.
 
         Returns:

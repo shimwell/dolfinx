@@ -527,6 +527,97 @@ void test_local_global_index_conversion()
   CHECK_THROWS_AS(map.global_to_local(global_two, local),
                   std::invalid_argument);
 }
+/// Cross-check num_sharing_ranks against IndexMap::index_to_dest_ranks,
+/// which lists the sharing ranks of every local index bar the calling
+/// rank, for owned and ghost indices alike.
+void test_num_sharing_ranks()
+{
+  const int size = dolfinx::MPI::size(MPI_COMM_WORLD);
+  const int rank = dolfinx::MPI::rank(MPI_COMM_WORLD);
+
+  // Each rank owns one index and ghosts its neighbours', so every index
+  // is shared by min(size, 3) ranks
+  const std::int32_t n = 1;
+  std::vector<std::int64_t> ghosts;
+  std::vector<int> owners;
+  for (int r : {(rank + size - 1) % size, (rank + 1) % size})
+  {
+    if (r != rank
+        and std::ranges::find(ghosts, static_cast<std::int64_t>(r))
+                == ghosts.end())
+    {
+      ghosts.push_back(r);
+      owners.push_back(r);
+    }
+  }
+  const common::IndexMap map(MPI_COMM_WORLD, n, ghosts, owners);
+
+  const std::int32_t num_local = map.size_local() + map.num_ghosts();
+  std::vector<std::int32_t> indices(num_local);
+  std::iota(indices.begin(), indices.end(), 0);
+
+  std::vector<std::int32_t> count = common::num_sharing_ranks(map, indices, 1);
+  REQUIRE(count.size() == static_cast<std::size_t>(num_local));
+
+  auto [data, offsets] = map.index_to_dest_ranks();
+  REQUIRE(offsets.size() == static_cast<std::size_t>(num_local) + 1);
+  for (std::int32_t i = 0; i < num_local; ++i)
+    CHECK(count[i] == offsets[i + 1] - offsets[i] + 1);
+
+  // Reusing an existing Scatterer must give the same answer
+  common::Scatterer sc(map);
+  std::vector<std::int32_t> count_sc
+      = common::num_sharing_ranks(map, sc, indices, 1);
+  CHECK(count_sc == count);
+
+  // A block size unrolls each block into bs consecutive entries, which
+  // share the count of their block
+  const int bs = 3;
+  std::vector<std::int32_t> unrolled(bs * num_local);
+  std::iota(unrolled.begin(), unrolled.end(), 0);
+  std::vector<std::int32_t> count_bs
+      = common::num_sharing_ranks(map, unrolled, bs);
+  for (std::int32_t i = 0; i < bs * num_local; ++i)
+    CHECK(count_bs[i] == count[i / bs]);
+
+  // The indices above are all shared alike, so a per-index count is
+  // indistinguishable from a constant. A star pattern is not.
+  std::vector<std::int64_t> star_ghosts;
+  std::vector<int> star_owners;
+  if (rank != 0)
+  {
+    star_ghosts.push_back(0);
+    star_owners.push_back(0);
+  }
+  const common::IndexMap star(MPI_COMM_WORLD, 1, star_ghosts, star_owners);
+  const std::int32_t num_star = star.size_local() + star.num_ghosts();
+  std::vector<std::int32_t> star_indices(num_star);
+  std::iota(star_indices.begin(), star_indices.end(), 0);
+  std::vector<std::int32_t> star_count
+      = common::num_sharing_ranks(star, star_indices, 1);
+  if (rank == 0)
+    CHECK(star_count[0] == size);
+  else
+  {
+    CHECK(star_count[0] == 1);
+    CHECK(star_count[1] == size);
+  }
+
+  // Precondition violations, on every rank together
+  CHECK_THROWS_AS(common::num_sharing_ranks(map, indices, 0),
+                  std::invalid_argument);
+  CHECK_THROWS_AS(common::num_sharing_ranks(map, indices, -1),
+                  std::invalid_argument);
+  const std::vector<std::int32_t> past_end{num_local};
+  CHECK_THROWS_AS(common::num_sharing_ranks(map, past_end, 1),
+                  std::out_of_range);
+  const std::vector<std::int32_t> negative{-1};
+  CHECK_THROWS_AS(common::num_sharing_ranks(map, negative, 1),
+                  std::out_of_range);
+  CHECK_THROWS_AS(common::num_sharing_ranks(map, negative, bs),
+                  std::out_of_range);
+}
+
 } // namespace
 
 TEST_CASE("Scatter forward using IndexMap", "[index_map_scatter_fwd]")
@@ -587,4 +678,9 @@ TEST_CASE("Compute owned IndexMap indices", "[index_map_owned_indices]")
 TEST_CASE("IndexMap local/global conversions", "[index_map_conversions]")
 {
   CHECK_NOTHROW(test_local_global_index_conversion());
+}
+
+TEST_CASE("Number of sharing ranks", "[index_map_num_sharing_ranks]")
+{
+  CHECK_NOTHROW(test_num_sharing_ranks());
 }

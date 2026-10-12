@@ -37,6 +37,7 @@ __all__ = [
     "matrix_csr",
     "norm",
     "orthonormalize",
+    "set_diagonal",
     "sparsity_pattern",
     "sparsity_pattern_blocked",
     "vector",
@@ -175,12 +176,44 @@ class SparsityPattern:
         self._cpp_object = sp
 
     def index_map(self, dim: int) -> IndexMap:
-        """Index map for the rows (``dim=0``) or columns (``dim=1``).
+        """Index map for the rows or columns.
+
+        Note:
+            Finalizing can add column ghosts to the column map
+            (``dim=1``).
 
         Args:
             dim: 0 for the row map, 1 for the column map.
         """
         return IndexMap(self._cpp_object.index_map(dim))
+
+    @functools.cached_property
+    def _input_index_maps(self) -> tuple[IndexMap, IndexMap]:
+        """Wrappers for the maps passed to the constructor."""
+        return (
+            IndexMap(self._cpp_object.input_index_map(0)),
+            IndexMap(self._cpp_object.input_index_map(1)),
+        )
+
+    def input_index_map(self, dim: int) -> IndexMap:
+        """Input index map used to construct the pattern.
+
+        Finalizing can add column ghosts to ``index_map(1)``. When no
+        rank adds a column ghost, ``input_index_map(1)`` and
+        ``index_map(1)`` wrap the same C++ object.
+
+        Note:
+            The input maps are fixed at construction, so the wrappers
+            are built on first access and the same objects are returned
+            thereafter. :func:`index_map` is not cached, as
+            :func:`finalize` can replace the column map.
+
+        Args:
+            dim: 0 for the row map, 1 for the column map.
+        """
+        if dim not in (0, 1):
+            raise IndexError(f"Sparsity pattern dimension must be 0 or 1, not {dim}.")
+        return self._input_index_maps[dim]
 
     @property
     def num_nonzeros(self) -> int:
@@ -260,13 +293,28 @@ class MatrixCSR(Generic[Scalar]):
         """
         self._cpp_object = A
 
+    @functools.cached_property
+    def _index_maps(self) -> tuple[IndexMap, IndexMap]:
+        """Wrappers for the row and column maps."""
+        return (
+            IndexMap(self._cpp_object.index_map(0)),
+            IndexMap(self._cpp_object.index_map(1)),
+        )
+
     def index_map(self, i: int) -> IndexMap:
         """Index map for row/column.
+
+        Note:
+            The maps are fixed at construction, so the wrappers are
+            built on first access and the same objects are returned
+            thereafter.
 
         Args:
             i: 0 for row map, 1 for column map.
         """
-        return IndexMap(self._cpp_object.index_map(i))
+        if i not in (0, 1):
+            raise IndexError(f"Matrix dimension must be 0 or 1, not {i}.")
+        return self._index_maps[i]
 
     def mult(self, x: Vector[Scalar], y: Vector[Scalar], transpose: bool = False) -> None:
         """Compute ``y += Ax`` or ``y += A^T x``.
@@ -291,14 +339,14 @@ class MatrixCSR(Generic[Scalar]):
             self.index_map(1).size_local != B.index_map(0).size_local
             or self.index_map(1).size_global != B.index_map(0).size_global
         ):
-            raise RuntimeError("Invalid matrix sizes for matmul.")
+            raise ValueError("Invalid matrix sizes for matmul.")
         if (
             self.block_size[0] != 1
             or self.block_size[1] != 1
             or B.block_size[0] != 1
             or B.block_size[1] != 1
         ):
-            raise RuntimeError("Block size not supported in matmul.")
+            raise ValueError("Block size not supported in matmul.")
 
         return MatrixCSR(self._cpp_object.mult(B._cpp_object))  # type: ignore[arg-type]
 
@@ -524,7 +572,7 @@ def matrix_csr(
     elif np.issubdtype(dtype, np.complex128):
         ftype = _cpp.la.MatrixCSR_complex128
     else:
-        raise NotImplementedError(f"Type {dtype} not supported.")
+        raise TypeError(f"Type {dtype} not supported.")
 
     return MatrixCSR(ftype(sp._cpp_object, block_mode))
 
@@ -573,7 +621,7 @@ def vector(
     elif np.issubdtype(dtype, np.int64):
         vtype = _cpp.la.Vector_int64
     else:
-        raise NotImplementedError(f"Type {dtype} not supported.")
+        raise TypeError(f"Type {dtype} not supported.")
 
     if scatterer is None:
         return Vector(vtype(map._cpp_object, bs))
@@ -602,3 +650,32 @@ def norm(x: Vector[_T], type: _cpp.la.Norm = _cpp.la.Norm.l2) -> float:
         Computed norm.
     """
     return _cpp.la.norm(x._cpp_object, type)  # type: ignore[arg-type]
+
+
+def set_diagonal(
+    A: MatrixCSR[Scalar],
+    rows: npt.NDArray[np.int32],
+    diagonal: Scalar | float | complex | npt.NDArray[Scalar] = 1.0,
+    insert_mode: InsertMode = InsertMode.insert,
+) -> None:
+    """Set or add values on the diagonal for given rows of a matrix.
+
+    Args:
+        A: Matrix to modify.
+        rows: Rows, in local indices, to set the diagonal value for.
+        diagonal: Value to set on the diagonal, either a single value
+            for all rows or an array with ``diagonal[i]`` the value for
+            ``rows[i]``. An array must have the same length as
+            ``rows``.
+        insert_mode: ``InsertMode.insert`` to set the diagonal entries,
+            or ``InsertMode.add`` to add to them.
+
+    Note:
+        A row that the calling rank does not own is accumulated into
+        the owner's entry when the matrix is finalised, so pass owned
+        rows unless that accumulation is intended. A row repeated in
+        ``rows`` is likewise written once per occurrence.
+    """
+    if np.ndim(diagonal) > 0:
+        diagonal = np.asarray(diagonal, dtype=A.data.dtype)
+    _cpp.la.set_diagonal(A._cpp_object, rows, diagonal, insert_mode)  # type: ignore[arg-type]

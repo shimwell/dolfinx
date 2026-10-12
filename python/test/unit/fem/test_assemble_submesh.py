@@ -106,7 +106,7 @@ def test_submesh_cell_assembly(d, n, k, space, ghost_mode):
 @pytest.mark.parametrize("k", [1, 4])
 @pytest.mark.parametrize("space", ["Lagrange", "Discontinuous Lagrange"])
 @pytest.mark.parametrize("ghost_mode", [GhostMode.none, GhostMode.shared_facet])
-def test_submesh_facet_assembly(n, k, space, ghost_mode):
+def test_submesh_facet_assembly(n, k, space, ghost_mode) -> None:
     """Test that assembling a form over the face of a unit cube gives
     the same result as assembling it over a unit square.
     """
@@ -190,7 +190,7 @@ def M_ufl(f, g, measure):
 @pytest.mark.parametrize("k", [1, 3])
 @pytest.mark.parametrize("space", ["Lagrange", "Discontinuous Lagrange"])
 @pytest.mark.parametrize("integral_type", ["dx", "ds", "dS"])
-def test_mixed_dom_codim_0(n, k, space, integral_type):
+def test_mixed_dom_codim_0(n, k, space, integral_type) -> None:
     """Test assembling forms where the trial and test functions
     are defined over different meshes.
     """
@@ -294,7 +294,7 @@ def test_mixed_dom_codim_0(n, k, space, integral_type):
 
 @pytest.mark.parametrize("n", [4, 6])
 @pytest.mark.parametrize("k", [1, 3])
-def test_mixed_dom_codim_1(n, k):
+def test_mixed_dom_codim_1(n, k) -> None:
     """Test assembling forms where the trial functions, test functions
     and coefficients are defined over different meshes of different topological
     dimension.
@@ -482,7 +482,7 @@ def compute_codim1_and_manifold_dx(msh, k, integrand):
     ],
 )
 @pytest.mark.parametrize("k", [1, 3])
-def test_codim_1_gradient(cell_type, expected, k):
+def test_codim_1_gradient(cell_type, expected, k) -> None:
     """Grad of a codimension-1 submesh coefficient, via the parent's
     facet measure and via the submesh's own cell measure.
 
@@ -508,7 +508,7 @@ def test_codim_1_gradient(cell_type, expected, k):
     [CellType.triangle, CellType.quadrilateral, CellType.tetrahedron, CellType.hexahedron],
 )
 @pytest.mark.parametrize("degree", [2, 3])
-def test_codim_1_gradient_higher_order_geometry(cell_type, degree):
+def test_codim_1_gradient_higher_order_geometry(cell_type, degree) -> None:
     """Same test as `test_codim_1_gradient`, on curved parent geometry.
 
     Does not have a closed form solution.
@@ -528,7 +528,7 @@ def test_codim_1_gradient_higher_order_geometry(cell_type, degree):
         (CellType.hexahedron, 72.0),
     ],
 )
-def test_codim_1_spatial_coordinate(cell_type, expected):
+def test_codim_1_spatial_coordinate(cell_type, expected) -> None:
     """`SpatialCoordinate` of a codimension-1 submesh under the parent's
     exterior facet measure.
 
@@ -589,7 +589,7 @@ def test_codim_1_gradient_interior_facet(cell_type):
         assert np.isclose(c, c_submesh)
 
 
-def test_disjoint_submeshes():
+def test_disjoint_submeshes() -> None:
     # FIXME Simplify this test
     """Test assembly with multiple disjoint submeshes in same variational form."""
     N = 10
@@ -878,7 +878,7 @@ def test_interior_facet_codim_1(msh):
     np.testing.assert_allclose(b_submesh.array, b_ref.array, atol=tol)
 
 
-def test_interior_interface():
+def test_interior_interface() -> None:
     """This is a test for assembling a form over an interface between
     two domains that don't overlap. The test function is defined on one
     domain, and the trial function is defined on the other.
@@ -1049,3 +1049,116 @@ def test_mixed_zero_form_compile() -> None:
     assert np.isclose(A.squared_norm(), 0.0)
     assert A.index_map(0).size_global == V.dofmap.index_map.size_global
     assert A.index_map(1).size_global == Q.dofmap.index_map.size_global
+
+
+def _ridge_submesh(n, ghost_mode):
+    """A unit cube and the submesh of all of its edges."""
+    msh = create_unit_cube(MPI.COMM_WORLD, n, n, n, ghost_mode=ghost_mode)
+    tdim = msh.topology.dim
+    msh.topology.create_entities(tdim - 2)
+    msh.topology.create_connectivity(tdim - 2, tdim)
+    ridge_map = msh.topology.index_map(tdim - 2)
+    ridges = np.arange(ridge_map.size_local + ridge_map.num_ghosts, dtype=np.int32)
+    smsh, entity_map = create_submesh(msh, tdim - 2, ridges)[:2]
+    return msh, smsh, entity_map
+
+
+@pytest.mark.parametrize("k", [1, 2])
+@pytest.mark.parametrize("ghost_mode", [GhostMode.none, GhostMode.shared_facet])
+def test_mixed_dom_codim_2(k, ghost_mode) -> None:
+    """Assemble over the ridges of a mesh with data on a codim-2 submesh.
+
+    Integrating over the parent's ridges must give the same value as
+    integrating over the submesh itself, since the submesh is every
+    ridge. The degree-2 case is orientation sensitive: an edge's dofs are
+    ``[v0, v1, midpoint]``, so a wrong permutation swaps the endpoints.
+    """
+    msh, smsh, entity_map = _ridge_submesh(3, ghost_mode)
+
+    Vbar = fem.functionspace(smsh, ("Lagrange", k))
+    g = fem.Function(Vbar)
+    g.interpolate(lambda x: np.sin(np.pi * x[0]) + x[1] * x[2] ** 2)
+    x = ufl.SpatialCoordinate(smsh)
+
+    dr = ufl.Measure("dr", domain=msh)
+    dx_sub = ufl.Measure("dx", domain=smsh)
+
+    integrands = {
+        "coefficient": lambda m: g * m,
+        "gradient": lambda m: ufl.dot(ufl.grad(g), ufl.grad(g)) * m,
+        "spatial coordinate": lambda m: (x[0] + 2 * x[1] + 3 * x[2]) * m,
+        "mixed": lambda m: g * x[0] * m,
+    }
+    for name, integrand in integrands.items():
+        reference = smsh.comm.allreduce(
+            fem.assemble_scalar(fem.form(integrand(dx_sub))), op=MPI.SUM
+        )
+        M = fem.form(integrand(dr), entity_maps=[entity_map])
+        assert M._cpp_object.needs_facet_permutations
+        value = msh.comm.allreduce(fem.assemble_scalar(M), op=MPI.SUM)
+        assert np.isclose(reference, value), name
+
+
+@pytest.mark.parametrize("ghost_mode", [GhostMode.none, GhostMode.shared_facet])
+def test_mixed_dom_codim_2_arguments(ghost_mode) -> None:
+    """Arguments, not just coefficients, may live on a codim-2 submesh."""
+    msh, smsh, entity_map = _ridge_submesh(3, ghost_mode)
+
+    Vbar = fem.functionspace(smsh, ("Lagrange", 2))
+    ubar, vbar = ufl.TrialFunction(Vbar), ufl.TestFunction(Vbar)
+
+    dr = ufl.Measure("dr", domain=msh)
+    dx_sub = ufl.Measure("dx", domain=smsh)
+
+    A = fem.assemble_matrix(fem.form(ufl.inner(ubar, vbar) * dx_sub))
+    A.scatter_reverse()
+    A1 = fem.assemble_matrix(fem.form(ufl.inner(ubar, vbar) * dr, entity_maps=[entity_map]))
+    A1.scatter_reverse()
+    assert np.isclose(A.squared_norm(), A1.squared_norm())
+
+    b = fem.assemble_vector(fem.form(ufl.inner(1.0, vbar) * dx_sub))
+    b.scatter_reverse(la.InsertMode.add)
+    b1 = fem.assemble_vector(fem.form(ufl.inner(1.0, vbar) * dr, entity_maps=[entity_map]))
+    b1.scatter_reverse(la.InsertMode.add)
+    assert np.isclose(la.norm(b), la.norm(b1))
+
+
+def test_mixed_dom_entity_dim_must_match_submesh_dim() -> None:
+    """The data must live on the entities being integrated over.
+
+    A ridge integral with data on a codim-1 (facet) submesh cannot be
+    expressed: the mapping takes an integration entity to a *cell* of the
+    other mesh, and a ridge is not a facet. FFCx rejects the combination
+    while compiling the kernel, since the ridge quadrature points have
+    the wrong dimension for a facet element; `Form`'s own check is a
+    backstop for callers building a form in C++ with a custom kernel.
+    """
+    msh = create_unit_cube(MPI.COMM_WORLD, 2, 2, 2)
+    tdim = msh.topology.dim
+    msh.topology.create_connectivity(tdim - 1, tdim)
+    facets = exterior_facet_indices(msh.topology)
+    smsh, entity_map = create_submesh(msh, tdim - 1, facets)[:2]
+
+    msh.topology.create_entities(tdim - 2)
+    msh.topology.create_connectivity(tdim - 2, tdim)
+
+    g = fem.Function(fem.functionspace(smsh, ("Lagrange", 1)))
+    with pytest.raises(RuntimeError):
+        fem.form(g * ufl.Measure("dr", domain=msh), entity_maps=[entity_map])
+
+
+def test_mixed_dom_vertex_integral_unsupported() -> None:
+    """Vertex integrals with data on another mesh are not supported.
+
+    Rejected by FFCx while compiling the kernel; `Form` also refuses the
+    integral type.
+    """
+    msh = create_unit_square(MPI.COMM_WORLD, 2, 2)
+    tdim = msh.topology.dim
+    msh.topology.create_connectivity(tdim - 1, tdim)
+    facets = exterior_facet_indices(msh.topology)
+    smsh, entity_map = create_submesh(msh, tdim - 1, facets)[:2]
+
+    g = fem.Function(fem.functionspace(smsh, ("Lagrange", 1)))
+    with pytest.raises(RuntimeError):
+        fem.form(g * ufl.Measure("dP", domain=msh), entity_maps=[entity_map])

@@ -52,11 +52,7 @@ namespace
 template <typename T>
 constexpr bool nothrow_move_c = std::is_nothrow_move_constructible_v<T>;
 
-/// @brief Non-throwing move assignment. Not asserted for io::XDMFFile,
-/// which does not provide a move assignment operator, nor for
-/// fem::Expression, whose std::function member is not required by the
-/// standard to be non-throwing on move assignment (libc++ and libstdc++
-/// both make it so, but that is not guaranteed).
+/// @brief Non-throwing move assignment, required of every type.
 template <typename T>
 constexpr bool nothrow_move_a = std::is_nothrow_move_assignable_v<T>;
 
@@ -67,6 +63,8 @@ struct scalar_classes
   static_assert(nothrow_move_c<fem::Constant<T>>);
   static_assert(nothrow_move_c<fem::DirichletBC<T>>);
   static_assert(nothrow_move_c<fem::Expression<T>>);
+  // Form's move constructor is explicitly noexcept: MSVC's std::map
+  // move constructor isn't noexcept (see Form.h).
   static_assert(nothrow_move_c<fem::Form<T>>);
   static_assert(nothrow_move_c<fem::Function<T>>);
   static_assert(nothrow_move_c<la::MatrixCSR<T>>);
@@ -77,7 +75,7 @@ struct scalar_classes
   static_assert(nothrow_move_a<fem::Constant<T>>);
   static_assert(nothrow_move_a<fem::DirichletBC<T>>);
   static_assert(nothrow_move_a<fem::Form<T>>);
-  static_assert(std::is_move_assignable_v<fem::Expression<T>>);
+  static_assert(nothrow_move_a<fem::Expression<T>>);
   static_assert(nothrow_move_a<fem::Function<T>>);
   static_assert(nothrow_move_a<la::MatrixCSR<T>>);
   static_assert(nothrow_move_a<la::Vector<T>>);
@@ -128,6 +126,8 @@ static_assert(nothrow_move_c<common::IndexMap>);
 static_assert(nothrow_move_c<common::Scatterer<>>);
 static_assert(nothrow_move_c<dolfinx::MPI::Comm>);
 static_assert(nothrow_move_c<dolfinx::MPI::Datatype<double>>);
+static_assert(nothrow_move_c<dolfinx::MPI::Request>);
+// Explicitly noexcept, see Table.h.
 static_assert(nothrow_move_c<dolfinx::Table>);
 static_assert(nothrow_move_c<common::Timer<>>);
 static_assert(nothrow_move_c<fem::DofMap>);
@@ -138,12 +138,14 @@ static_assert(nothrow_move_c<io::VTKFile>);
 static_assert(nothrow_move_c<io::XDMFFile>);
 static_assert(nothrow_move_c<la::SparsityPattern>);
 static_assert(nothrow_move_c<mesh::EntityMap>);
+// Explicitly noexcept, see Topology.h.
 static_assert(nothrow_move_c<mesh::Topology>);
 
 static_assert(nothrow_move_a<common::IndexMap>);
 static_assert(nothrow_move_a<common::Scatterer<>>);
 static_assert(nothrow_move_a<dolfinx::MPI::Comm>);
 static_assert(nothrow_move_a<dolfinx::MPI::Datatype<double>>);
+static_assert(nothrow_move_a<dolfinx::MPI::Request>);
 static_assert(nothrow_move_a<dolfinx::Table>);
 static_assert(nothrow_move_a<common::Timer<>>);
 static_assert(nothrow_move_a<fem::DofMap>);
@@ -151,6 +153,7 @@ static_assert(nothrow_move_a<fem::ElementDofLayout>);
 static_assert(nothrow_move_a<graph::AdjacencyList<std::int32_t>>);
 static_assert(nothrow_move_a<graph::AdjacencyList<std::int64_t>>);
 static_assert(nothrow_move_a<io::VTKFile>);
+static_assert(nothrow_move_a<io::XDMFFile>);
 static_assert(nothrow_move_a<la::SparsityPattern>);
 static_assert(nothrow_move_a<mesh::EntityMap>);
 static_assert(nothrow_move_a<mesh::Topology>);

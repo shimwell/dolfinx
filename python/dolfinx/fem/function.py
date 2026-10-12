@@ -70,12 +70,12 @@ class Constant(ufl.Constant, Generic[Scalar]):
         self._cpp_object = cpp_type(c)
 
     @property
-    def value(self) -> npt.NDArray:
+    def value(self) -> npt.NDArray[Scalar]:
         """The value of the constant."""
-        return self._cpp_object.value
+        return typing.cast(npt.NDArray[Scalar], self._cpp_object.value)
 
     @value.setter
-    def value(self, v: npt.NDArray[Scalar]) -> None:
+    def value(self, v: npt.ArrayLike) -> None:
         np.copyto(self._cpp_object.value, np.asarray(v))
 
     @property
@@ -172,7 +172,7 @@ class Expression(Generic[Scalar]):
             try:
                 domains = ufl.domain.extract_domains(e)
                 if len(domains) == 0:
-                    raise RuntimeError("Could not extract MPI communicator for Expression.")
+                    raise ValueError("Could not extract MPI communicator for Expression.")
                 domain = domains[0]
                 assert isinstance(domain, ufl.Mesh)
                 from dolfinx.mesh import _mesh_from_ufl_domain
@@ -216,7 +216,7 @@ class Expression(Generic[Scalar]):
         elif len(arguments) == 1:
             self._argument_space = arguments[0].ufl_function_space()
         else:
-            raise RuntimeError("Expressions with more that one Argument not allowed.")
+            raise ValueError("Expressions with more than one Argument not allowed.")
 
         # Geometry type is fixed by the expression's mesh.
         expr_domains = ufl.domain.extract_domains(e)
@@ -296,7 +296,7 @@ class Expression(Generic[Scalar]):
             values = np.zeros(values_shape, dtype=self.dtype)
         else:
             if values.shape != values_shape:
-                raise TypeError("Passed values array does not have correct shape.")
+                raise ValueError("Passed values array does not have correct shape.")
             if values.dtype != self.dtype:
                 raise TypeError("Passed values array does not have correct dtype.")
 
@@ -710,7 +710,7 @@ def functionspace(
         raise ValueError("Non-matching UFL cell and mesh cell shapes.")
 
     # Create DOLFINx objects
-    dolfinx_element = finiteelement(mesh.topology.cell_type, ufl_e, dtype)
+    dolfinx_element = finiteelement(mesh.topology.cell_type, ufl_e, dtype, mesh.geometry.dim)
 
     if ufl_e.is_real:
         dof_layout = _cpp.fem.create_element_dof_layout(dolfinx_element._cpp_object, [])
@@ -762,7 +762,7 @@ class FunctionSpace(ufl.FunctionSpace, Generic[Real]):
             cppV: Compiled C++ function space.
         """
         if mesh._cpp_object is not cppV.mesh:
-            raise RuntimeError("Meshes do not match in function space initialisation.")
+            raise ValueError("Meshes do not match in function space initialisation.")
         ufl_domain = mesh.ufl_domain()
         self._cpp_object = cppV
         self._mesh = mesh
